@@ -81,6 +81,28 @@ off for comparison. The constants are tuned approximations, not cycle-exact timi
 - **RBG0:** the rotation plane rendered as an infinite ground. The texture repeats, there are no mipmaps (so the
   distance shimmers), and the plane fades into the haze colour in 32 colour-calculation ratio steps.
 
+## Display: `shaders/ntsc.wgsl`, `shaders/present.wgsl`
+
+The VDP output is identical in every mode; these filters only model how it reached the player's eyes.
+
+- **NTSC composite (F6).** Every scanline is encoded into a composite signal: luma plus chroma on a 3.58 MHz
+  subcarrier, about 0.53 cycles per Saturn dot, sampled 4 times per dot. The phase flips every line and every
+  frame. It is then decoded like a TV: a low-pass filter for luma (some subcarrier leaks through, so dot crawl
+  appears), and demodulation with a much narrower filter for chroma (colour bleeds over several dots, and sharp luma
+  edges produce rainbow fringes). Mesh transparency's checkerboard turns into real transparency, as on a composite
+  TV.
+- **CRT (F2, last step).** Calculated in linear light:
+  - each dot is drawn with a Gaussian beam spot about a dot wide, so neighbouring dots melt together;
+  - each scanline has a Gaussian vertical profile that widens with brightness, so bright lines bloom into the gaps
+    and dark lines leave visible scanlines;
+  - a faint halation glow surrounds bright areas;
+  - an aperture grille splits the light into red, green and blue stripes. It is only drawn when each dot is at
+    least about three window pixels wide, to avoid moiré.
+- **Scanlines (F2).** Sharp dots with light or dark gaps between lines.
+
+The filters combine: NTSC plus CRT is the "composite cable into a consumer TV" look. Both cost noticeable GPU time on
+very weak GPUs; the sharp mode is the cheapest.
+
 ## Known deviations
 
 - Memory images are **little-endian**; the Saturn is big-endian. Field layouts are otherwise the same.

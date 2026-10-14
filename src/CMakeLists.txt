@@ -54,6 +54,7 @@ gridfin_embed_files(gridfin
     HEADER Shaders.hpp
     FILES
         ../shaders/vdp.wgsl
+        ../shaders/ntsc.wgsl
         ../shaders/present.wgsl)
 
 if(GRIDFIN_SHADER_HOT_RELOAD AND NOT EMSCRIPTEN)

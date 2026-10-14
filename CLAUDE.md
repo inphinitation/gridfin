@@ -9,7 +9,8 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
 - Web: `source <emsdk>/emsdk_env.sh && cmake --workflow --preset web`.
 - CI equivalent with warnings as errors: `cmake --workflow --preset ci`.
 - Headless smoke test (Linux, needs Xvfb + a Vulkan driver such as lavapipe):
-  `xvfb-run ./build/native/bin/Debug/gridfin --frames 60 --screenshot out.bmp`.
+  `xvfb-run ./build/native/bin/Debug/gridfin --frames 60 --screenshot out.bmp`. To check display filters, add
+  `--filter crt --ntsc --capture-display` (saves the filtered window output instead of the framebuffer).
 - Format before committing: `git ls-files '*.cpp' '*.hpp' | xargs clang-format -i`.
   Wrap JavaScript inside `EM_JS` in `// clang-format off/on` (the formatter breaks `=>`).
 
