@@ -180,3 +180,29 @@ TEST_CASE("an overloaded command list needs more than one field")
     CHECK(geometry.stats().vdp1Load() > 1.0f);
     CHECK(geometry.stats().fieldsNeeded() >= 2);
 }
+
+TEST_CASE("billboards fade to mesh up close and are culled before they fill the screen")
+{
+    const View view = testView();
+    Vdp1Vram vram;
+    TextureCache textures(vram);
+    const std::vector<std::uint8_t> pixels(32 * 64, 1);
+    const auto id = textures.addLutTexture(32, 64, pixels, Lut{});
+    REQUIRE(id);
+    Material material;
+    material.texture = *id;
+
+    const auto drawAt = [&](float distance) {
+        Geometry geometry;
+        geometry.begin(view, {}, &textures);
+        geometry.billboard({0.0f, -0.5f, -distance}, {0.5f, 1.0f}, material);
+        geometry.end(vram);
+        return vram.commandCount();
+    };
+
+    REQUIRE(drawAt(5.0f) == 1);
+    CHECK((vram.read16(4) & pmod::kMesh) == 0);
+    REQUIRE(drawAt(1.0f) == 1);
+    CHECK((vram.read16(4) & pmod::kMesh) != 0);
+    CHECK(drawAt(0.5f) == 0);
+}

@@ -46,7 +46,13 @@ Every frame's command list gets an estimated VDP1 drawing time, compared against
 - quads and sprites are drawn line by line. A textured quad walks **at least one line per texture row** however
   small it is on screen, so tall textures on distant polygons are expensive, as on the real chip;
 - every line costs its length in pixels plus a setup cost; shadow and half-transparency read the framebuffer and
-  cost about twice as much per pixel.
+  cost about twice as much per pixel;
+- pixels outside the screen are stepped over but not written, at an eighth of the cost. The visible share is
+  estimated from the primitive's bounding box. A huge primitive near the camera is still expensive, as on the
+  real chip, but no longer costs as if every off-screen pixel were drawn.
+
+Billboards (scaled sprites) switch to mesh transparency within 1.5 m of the camera and are culled within 0.8 m,
+the way Saturn games faded sprites out before they could fill the screen.
 
 When the estimate exceeds one field the frame stays on screen for as many fields as it needs, so the game drops
 to 30 fps (or lower) the way Saturn games did. The window title shows the load; **F4** switches the enforcement

@@ -106,6 +106,10 @@ struct GeometryStats {
 class Geometry {
 public:
     static constexpr int kOrderingTableSize = 1024;
+    /// Billboards closer than this switch to mesh transparency, and closer than the cull distance
+    /// they are not drawn: Saturn games faded out sprites before they could fill the screen.
+    static constexpr float kBillboardMeshDistance = 1.5f;
+    static constexpr float kBillboardCullDistance = 0.8f;
 
     /// Starts a frame. Textures are resolved through `textures` (which also begins its frame);
     /// without a cache every textured polygon is drawn flat.

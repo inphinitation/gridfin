@@ -8,8 +8,10 @@
 ///
 /// VDP1 draws every primitive as a series of lines. For textured quads it walks
 /// at least one line per texture row, however small the quad is on screen, and
-/// every line costs its length in pixels. Colour calculation that reads the
-/// framebuffer (half-transparency, shadow) roughly doubles the per-pixel cost.
+/// every line costs its length in pixels. Pixels outside the screen are stepped
+/// over cheaply but not for free, so huge primitives close to the camera are
+/// still expensive. Colour calculation that reads the framebuffer
+/// (half-transparency, shadow) roughly doubles the per-pixel cost.
 /// When the list takes longer than a field, the frame is shown twice: the game
 /// drops to 30 fps (or lower).
 ///
@@ -27,6 +29,8 @@ inline constexpr std::uint32_t kCommandCycles = 40;        ///< fetching and dec
 inline constexpr std::uint32_t kGouraudCycles = 8;         ///< fetching the gouraud table
 inline constexpr std::uint32_t kLineSetupCycles = 4;       ///< per drawn line
 inline constexpr std::uint32_t kReadModifyWriteFactor = 2; ///< shadow and half-transparency
+/// Pixels outside the clip window are walked but not written, so they cost much less.
+inline constexpr std::uint32_t kClippedPixelsPerCycle = 8;
 
 /// Estimated cycles to draw one command.
 [[nodiscard]] std::uint32_t commandCycles(const Command& command) noexcept;
