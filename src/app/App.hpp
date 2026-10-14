@@ -40,6 +40,7 @@ private:
     void updateTitle(float dt);
     void requestScreenshot(std::string path);
     void toggleFullscreen();
+    void presentFrame();
 
     AppOptions m_options;
     SDL_Window* m_window = nullptr;
@@ -52,7 +53,10 @@ private:
 
     std::uint64_t m_lastTicks = 0;
     std::uint64_t m_frame = 0;
+    std::uint64_t m_holdUntil = 0;
+    bool m_enforceVdp1Timing = true;
     float m_titleTimer = 0.0f;
+    std::uint64_t m_titleDmaBytes = 0;
     int m_titleFrames = 0;
     bool m_quitRequested = false;
 };

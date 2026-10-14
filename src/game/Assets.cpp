@@ -109,20 +109,18 @@ template <std::size_t N>
 
 class Loader {
 public:
-    Loader(Vdp1Vram& vdp1, Vdp2Vram& vdp2) : m_vdp1(vdp1), m_vdp2(vdp2) {}
+    Loader(TextureCache& textures, Vdp2Vram& vdp2) : m_textures(textures), m_vdp2(vdp2) {}
 
     template <std::size_t N>
-    Texture texture(const char* name, const std::array<std::uint32_t, N>& colors, Image image)
+    TextureId texture(const char* name, const std::array<std::uint32_t, N>& colors, Image image)
     {
-        const auto lut = m_vdp1.uploadLut(makeLut(colors));
-        std::optional<Texture> texture;
-        if (lut) texture = m_vdp1.uploadLutTexture(image.width, image.height, image.pixels, *lut);
-        if (!texture) {
-            log::error("VDP1 VRAM exhausted while loading texture '{}'", name);
+        const auto id = m_textures.addLutTexture(image.width, image.height, image.pixels, makeLut(colors));
+        if (!id) {
+            log::error("Work RAM texture budget exhausted while loading texture '{}'", name);
             m_ok = false;
-            return {};
+            return kNoTexture;
         }
-        return *texture;
+        return *id;
     }
 
     template <std::size_t N>
@@ -143,7 +141,7 @@ public:
     [[nodiscard]] bool ok() const noexcept { return m_ok; }
 
 private:
-    Vdp1Vram& m_vdp1;
+    TextureCache& m_textures;
     Vdp2Vram& m_vdp2;
     bool m_ok = true;
 };
@@ -374,9 +372,9 @@ Image cloudImage()
 
 } // namespace
 
-bool Assets::load(Vdp1Vram& vdp1, Vdp2Vram& vdp2)
+bool Assets::load(TextureCache& textures, Vdp2Vram& vdp2)
 {
-    Loader loader(vdp1, vdp2);
+    Loader loader(textures, vdp2);
 
     gridTile =
         loader.texture("grid", std::array<std::uint32_t, 6>{0x1A3A6A, 0x22487E, 0x2C5794, 0x3CD0F0, 0xB0F8FF, 0x3070B0},
@@ -416,8 +414,9 @@ bool Assets::load(Vdp1Vram& vdp1, Vdp2Vram& vdp2)
         std::array<std::uint32_t, 7>{0xF8F8F8, 0xD8E4F0, 0xB4C8DE, 0x5E7EA6, 0x7896BA, 0xE8F0F8, 0x9AB4D2},
         cloudImage());
 
-    log::info("VDP1 VRAM textures: {} / {} bytes, VDP2 VRAM: {} / {} bytes", vdp1.dataBytesUsed(),
-              Vdp1Vram::dataBytesTotal(), vdp2.bytesUsed(), kVdp2VramSize);
+    const TextureCacheStats& stats = textures.stats();
+    log::info("Textures: {} in work RAM ({} bytes), VDP1 texture cache {} bytes; VDP2 VRAM: {} / {} bytes",
+              stats.registered, stats.workRamBytes, stats.vramBytesTotal, vdp2.bytesUsed(), kVdp2VramSize);
     return loader.ok();
 }
 

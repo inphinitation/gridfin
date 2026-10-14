@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 /// VDP1: the Saturn's sprite/polygon processor.
@@ -106,7 +107,7 @@ using GouraudTable = std::array<ColorWord, 4>;
 /// Layout:
 ///   0x00000  command table   (kMaxCommands * 32 bytes, rewritten every frame)
 ///   ...      gouraud tables  (kMaxCommands * 8 bytes, rewritten every frame)
-///   ...      textures + LUTs (allocated once at load time)
+///   ...      textures + LUTs (the TextureCache streams these in from work RAM)
 class Vdp1Vram {
 public:
     static constexpr std::uint32_t kMaxCommands = 2048;
@@ -138,19 +139,28 @@ public:
     [[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept { return m_bytes; }
     [[nodiscard]] std::uint16_t read16(std::uint32_t address) const noexcept;
     void write16(std::uint32_t address, std::uint16_t value) noexcept;
+    /// Copies bytes into the data region (a "DMA transfer") and marks them for upload to the GPU.
+    void writeData(std::uint32_t address, std::span<const std::uint8_t> data);
 
     [[nodiscard]] std::uint32_t dataBytesUsed() const noexcept { return m_dataTop - kDataAddress; }
     [[nodiscard]] static constexpr std::uint32_t dataBytesTotal() noexcept { return kVdp1VramSize - kDataAddress; }
 
-    /// Set whenever the data region changes; the renderer re-uploads and clears it.
-    bool dataDirty = true;
+    /// Byte ranges of the data region changed since the last call, merged and sorted.
+    /// The renderer takes them every frame to update the GPU copy.
+    [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint32_t>> takeDirtyRanges();
 
 private:
     std::vector<std::uint8_t> m_bytes;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> m_dirty; ///< [begin, end)
     std::uint32_t m_dataTop = kDataAddress;
     std::uint32_t m_commandCount = 0;
 };
 
 [[nodiscard]] bool isValidTextureSize(int width, int height) noexcept;
+
+/// Texture data in the VRAM byte format of each colour mode.
+[[nodiscard]] std::vector<std::uint8_t> packLut16(std::span<const std::uint8_t> indices); ///< 2 pixels per byte
+[[nodiscard]] std::vector<std::uint8_t> packLut(const Lut& lut);
+[[nodiscard]] std::vector<std::uint8_t> packRgb(std::span<const ColorWord> pixels);
 
 } // namespace gridfin::saturn

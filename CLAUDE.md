@@ -21,6 +21,8 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
   GPU-side shortcuts that bypass the model (depth buffers, texture filtering, tiling textures, triangle meshes).
 - Respect hardware limits: texture widths multiple of 8 (≤ 504) and heights ≤ 255, VRAM budgets, RGB555 colour,
   2047 commands per frame. Assets are generated procedurally into Saturn formats in `src/game/Assets.cpp`.
+- VDP1 textures are registered in `saturn::TextureCache` (work RAM) and referenced by `TextureId`; never write
+  textures into `Vdp1Vram` directly. Watch the VDP1 load in the window title: over 100% halves the frame rate.
 - `shaders/vdp.wgsl` decodes the same bytes the CPU writes; if you change a memory layout, update both sides and the
   uniform mirrors (`FrameUniforms` in `src/gfx/SaturnRenderer.cpp`).
 - Code against the standard `webgpu.h`; anything implementation specific must be behind `GRIDFIN_WGPU_NATIVE` or

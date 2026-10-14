@@ -97,7 +97,7 @@ SDL_AppResult App::init()
 
     log::info("Controls: WASD/left stick move, mouse/right stick look, Space/A jump, Shift/X run,");
     log::info("          wheel/d-pad zoom, V/Y first-third person, Esc release mouse,");
-    log::info("          F2 scanlines, F3 scaling, F5 reload shaders, F11 fullscreen, F12 screenshot");
+    log::info("          F2 scanlines, F3 scaling, F4 VDP1 timing, F5 reload shaders, F11 fullscreen, F12 screenshot");
     return SDL_APP_CONTINUE;
 }
 
@@ -145,6 +145,10 @@ SDL_AppResult App::handleEvent(const SDL_Event& event)
         case SDL_SCANCODE_F3:
             m_present.scale = static_cast<gpu::ScaleMode>((static_cast<int>(m_present.scale) + 1) % 3);
             break;
+        case SDL_SCANCODE_F4:
+            m_enforceVdp1Timing = !m_enforceVdp1Timing;
+            log::info("VDP1 timing {}", m_enforceVdp1Timing ? "enforced" : "ignored");
+            break;
         case SDL_SCANCODE_F5:
             if (m_renderer) m_renderer->reloadShaders();
             break;
@@ -163,18 +167,37 @@ SDL_AppResult App::handleEvent(const SDL_Event& event)
 
 void App::updateTitle(float dt)
 {
+    const saturn::GeometryStats& stats = m_machine->geometry.stats();
+    const saturn::TextureCacheStats& textures = m_machine->textures.stats();
     m_titleTimer += dt;
     ++m_titleFrames;
+    m_titleDmaBytes += textures.dmaBytes;
     if (m_titleTimer < 0.5f) return;
 
-    const saturn::GeometryStats& stats = m_machine->geometry.stats();
-    const auto title =
-        std::format("Gridfin | {:.0f} fps | VDP1 {}/{} commands, culled {} back {} near {} off{}",
-                    static_cast<float>(m_titleFrames) / m_titleTimer, stats.drawn, saturn::Vdp1Vram::kMaxCommands - 1,
-                    stats.culledBackface, stats.culledNear, stats.culledOffscreen, stats.overflow ? " | OVERFLOW" : "");
+    std::string timing = std::format("{:.0f}% of a field", stats.vdp1Load() * 100.0f);
+    if (!m_enforceVdp1Timing) {
+        timing += " (timing off)";
+    } else if (stats.fieldsNeeded() > 1) {
+        timing += std::format(" -> {} fields/frame", stats.fieldsNeeded());
+    }
+    const auto title = std::format(
+        "Gridfin | {:.0f} fps | VDP1 {}/{} cmds, {} | textures {}/{} in VRAM ({}/{} KB), DMA {} KB/s{}{}",
+        static_cast<float>(m_titleFrames) / m_titleTimer, stats.drawn, saturn::Vdp1Vram::kMaxCommands - 1, timing,
+        textures.resident, textures.registered, textures.vramBytesUsed / 1024, textures.vramBytesTotal / 1024,
+        static_cast<std::uint32_t>(static_cast<float>(m_titleDmaBytes) / 1024.0f / m_titleTimer),
+        stats.textureMisses ? " | streaming" : "", stats.overflow ? " | OVERFLOW" : "");
     SDL_SetWindowTitle(m_window, title.c_str());
     m_titleTimer = 0.0f;
     m_titleFrames = 0;
+    m_titleDmaBytes = 0;
+}
+
+void App::presentFrame()
+{
+    if (WGPUTexture target = m_gpu->acquireFrame()) {
+        m_renderer->render(*m_machine, target, m_gpu->width(), m_gpu->height(), m_present);
+        m_gpu->present();
+    }
 }
 
 SDL_AppResult App::iterate()
@@ -192,7 +215,17 @@ SDL_AppResult App::iterate()
 
     if (m_quitRequested) return SDL_APP_SUCCESS;
 
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    m_gpu->resize(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
+
     const std::uint64_t now = SDL_GetTicksNS();
+    if (now < m_holdUntil) {
+        // VDP1 is still drawing the last frame: the display shows it for another field.
+        presentFrame();
+        return SDL_APP_CONTINUE;
+    }
+
     const float dt = std::min(static_cast<float>(now - m_lastTicks) * 1e-9f, 0.1f);
     m_lastTicks = now;
 
@@ -201,21 +234,29 @@ SDL_AppResult App::iterate()
     m_game.update(stepDt, m_input->frame(stepDt));
     m_game.render(*m_machine);
 
-    int width = 0, height = 0;
-    SDL_GetWindowSizeInPixels(m_window, &width, &height);
-    m_gpu->resize(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
+    // A command list that takes VDP1 longer than a field holds the frame on screen for more fields,
+    // which is how Saturn games dropped from 60 to 30 fps. Automated runs keep one frame per iteration.
+    const std::uint32_t fields = m_machine->geometry.stats().fieldsNeeded();
+    m_holdUntil = 0;
+    if (m_enforceVdp1Timing && m_options.exitAfterFrames == 0 && fields > 1) {
+        constexpr std::uint64_t kFieldNs = 16'683'350; // 1 / 59.94 Hz
+        constexpr std::uint64_t kSlackNs = 2'000'000;  // so the next vsync isn't missed by a hair
+        m_holdUntil = now + (fields - 1) * kFieldNs - kSlackNs;
+    }
 
     ++m_frame;
     const bool lastFrame =
         m_options.exitAfterFrames > 0 && m_frame >= static_cast<std::uint64_t>(m_options.exitAfterFrames);
     if (lastFrame && !m_options.screenshotPath.empty()) requestScreenshot(m_options.screenshotPath);
 
-    if (WGPUTexture target = m_gpu->acquireFrame()) {
-        m_renderer->render(*m_machine, target, m_gpu->width(), m_gpu->height(), m_present);
-        m_gpu->present();
-    }
+    presentFrame();
 
     if (lastFrame) {
+        const saturn::GeometryStats& stats = m_machine->geometry.stats();
+        const saturn::TextureCacheStats& textures = m_machine->textures.stats();
+        log::info("Last frame: {} VDP1 commands, {:.1f}% of a field ({} cycles), textures {}/{} resident ({} bytes)",
+                  stats.drawn, stats.vdp1Load() * 100.0f, stats.vdp1Cycles, textures.resident, textures.registered,
+                  textures.vramBytesUsed);
         // Give the screenshot readback a chance to complete before quitting.
         m_renderer->waitForCaptures(m_gpu->instance());
         m_quitRequested = true;

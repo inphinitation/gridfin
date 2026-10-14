@@ -17,7 +17,7 @@ constexpr glm::vec3 kSpawn{0.0f, 0.0f, 6.0f};
 
 bool Game::init(Machine& machine)
 {
-    if (!m_assets.load(machine.vdp1, machine.vdp2)) return false;
+    if (!m_assets.load(machine.textures, machine.vdp2)) return false;
     m_world.buildTestLevel();
     m_player.spawn(kSpawn, 0.0f);
     m_cameraRig.reset(0.0f, radians(-12.0f));
@@ -78,7 +78,7 @@ void Game::render(Machine& machine) const
     machine.view = View::fromCamera(m_cameraRig.camera());
 
     Geometry& geometry = machine.geometry;
-    geometry.begin(machine.view, m_lighting);
+    geometry.begin(machine.view, m_lighting, &machine.textures);
     m_world.draw(geometry, m_assets);
     m_player.draw(geometry, m_assets, m_world, m_player.interpolatedPosition(m_accumulator / kFixedStep),
                   !m_cameraRig.firstPerson());

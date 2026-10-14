@@ -7,8 +7,12 @@ add_library(gridfin_engine STATIC
     saturn/Geometry.cpp
     saturn/Geometry.hpp
     saturn/Machine.hpp
+    saturn/TextureCache.cpp
+    saturn/TextureCache.hpp
     saturn/Vdp1.cpp
     saturn/Vdp1.hpp
+    saturn/Vdp1Timing.cpp
+    saturn/Vdp1Timing.hpp
     saturn/Vdp2.cpp
     saturn/Vdp2.hpp
     game/Assets.cpp
