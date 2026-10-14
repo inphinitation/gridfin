@@ -38,9 +38,17 @@ static_assert(sizeof(FrameUniforms) == 160);
 struct PresentUniforms {
     std::array<float, 4> viewport;
     std::array<float, 4> params;
+    std::array<float, 4> crt;
+};
+
+/// Mirrors `Ntsc` in shaders/ntsc.wgsl.
+struct NtscUniforms {
+    std::array<float, 4> params;
 };
 
 constexpr WGPUTextureFormat kScreenFormat = WGPUTextureFormat_RGBA8Unorm;
+constexpr WGPUTextureFormat kNtscFormat = WGPUTextureFormat_RGBA16Float;
+constexpr std::uint32_t kNtscSamplesPerDot = 4;
 
 [[nodiscard]] std::array<float, 4> vec4(glm::vec3 v)
 {
@@ -138,6 +146,7 @@ struct SaturnRenderer::Pipelines {
     RenderPipeline vdp2;
     RenderPipeline vdp1;
     RenderPipeline present;
+    RenderPipeline ntsc;
 };
 
 struct SaturnRenderer::PendingReload {
@@ -147,11 +156,14 @@ struct SaturnRenderer::PendingReload {
 
 struct SaturnRenderer::Capture {
     Buffer buffer;
+    Texture texture; ///< offscreen copy of the display, for display captures
     CaptureCallback callback;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t rowBytes = 0; ///< padded to 256 as copies require
+    bool bgra = false;
     bool done = false;
 };
-
-constexpr std::uint32_t kCaptureRowBytes = kScreenWidth * 4; // already a multiple of 256
 
 SaturnRenderer::SaturnRenderer() = default;
 SaturnRenderer::~SaturnRenderer() = default;
@@ -178,6 +190,7 @@ bool SaturnRenderer::init(WGPUDevice device, WGPUQueue queue, WGPUTextureFormat 
     m_cram = createBuffer(device, "VDP2 CRAM", kCramEntries * 2, WGPUBufferUsage_Storage);
     m_frameUniforms = createBuffer(device, "frame uniforms", sizeof(FrameUniforms), WGPUBufferUsage_Uniform);
     m_presentUniforms = createBuffer(device, "present uniforms", sizeof(PresentUniforms), WGPUBufferUsage_Uniform);
+    m_ntscUniforms = createBuffer(device, "NTSC uniforms", sizeof(NtscUniforms), WGPUBufferUsage_Uniform);
 
     // The 320x224 VDP framebuffer.
     WGPUTextureDescriptor screen = WGPU_TEXTURE_DESCRIPTOR_INIT;
@@ -187,6 +200,16 @@ bool SaturnRenderer::init(WGPUDevice device, WGPUQueue queue, WGPUTextureFormat 
     screen.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc;
     m_screen.reset(wgpuDeviceCreateTexture(device, &screen));
     m_screenView.reset(wgpuTextureCreateView(m_screen.get(), nullptr));
+
+    // The decoded composite signal, with several samples per dot.
+    WGPUTextureDescriptor ntsc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    ntsc.label = view("NTSC signal");
+    ntsc.size = {static_cast<std::uint32_t>(kScreenWidth) * kNtscSamplesPerDot,
+                 static_cast<std::uint32_t>(kScreenHeight), 1};
+    ntsc.format = kNtscFormat;
+    ntsc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+    m_ntsc.reset(wgpuDeviceCreateTexture(device, &ntsc));
+    m_ntscView.reset(wgpuTextureCreateView(m_ntsc.get(), nullptr));
 
     // Bind group layouts.
     {
@@ -239,29 +262,39 @@ bool SaturnRenderer::init(WGPUDevice device, WGPUQueue queue, WGPUTextureFormat 
         descriptor.entries = entries.data();
         m_presentLayout.reset(wgpuDeviceCreateBindGroupLayout(device, &descriptor));
 
-        std::array<WGPUBindGroupEntry, 2> bindings{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
-        bindings[0].binding = 0;
-        bindings[0].textureView = m_screenView.get();
-        bindings[1].binding = 1;
-        bindings[1].buffer = m_presentUniforms.get();
-        bindings[1].size = sizeof(PresentUniforms);
-        WGPUBindGroupDescriptor group = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-        group.label = view("present bind group");
-        group.layout = m_presentLayout.get();
-        group.entryCount = bindings.size();
-        group.entries = bindings.data();
-        m_presentBindGroup.reset(wgpuDeviceCreateBindGroup(device, &group));
+        // Texture + uniforms: shared by the NTSC pass and the present pass.
+        const auto makeGroup = [&](const char* label, WGPUTextureView texture, WGPUBuffer uniforms,
+                                   std::uint64_t size) {
+            std::array<WGPUBindGroupEntry, 2> bindings{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+            bindings[0].binding = 0;
+            bindings[0].textureView = texture;
+            bindings[1].binding = 1;
+            bindings[1].buffer = uniforms;
+            bindings[1].size = size;
+            WGPUBindGroupDescriptor group = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+            group.label = view(label);
+            group.layout = m_presentLayout.get();
+            group.entryCount = bindings.size();
+            group.entries = bindings.data();
+            return BindGroup(wgpuDeviceCreateBindGroup(device, &group));
+        };
+        m_presentBindGroup =
+            makeGroup("present bind group", m_screenView.get(), m_presentUniforms.get(), sizeof(PresentUniforms));
+        m_presentNtscBindGroup =
+            makeGroup("present NTSC bind group", m_ntscView.get(), m_presentUniforms.get(), sizeof(PresentUniforms));
+        m_ntscBindGroup = makeGroup("NTSC bind group", m_screenView.get(), m_ntscUniforms.get(), sizeof(NtscUniforms));
     }
 
     m_pipelines = createPipelines();
-    return m_pipelines && m_pipelines->vdp1 && m_pipelines->vdp2 && m_pipelines->present;
+    return m_pipelines && m_pipelines->vdp1 && m_pipelines->vdp2 && m_pipelines->present && m_pipelines->ntsc;
 }
 
 std::unique_ptr<SaturnRenderer::Pipelines> SaturnRenderer::createPipelines() const
 {
     const ShaderModule vdp = createShader(m_device, "vdp.wgsl", shaderSource("vdp", shaders::vdp));
     const ShaderModule present = createShader(m_device, "present.wgsl", shaderSource("present", shaders::present));
-    if (!vdp || !present) return nullptr;
+    const ShaderModule ntsc = createShader(m_device, "ntsc.wgsl", shaderSource("ntsc", shaders::ntsc));
+    if (!vdp || !present || !ntsc) return nullptr;
 
     const auto makeLayout = [&](WGPUBindGroupLayout group) {
         WGPUPipelineLayoutDescriptor descriptor = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
@@ -284,6 +317,8 @@ std::unique_ptr<SaturnRenderer::Pipelines> SaturnRenderer::createPipelines() con
                                      kScreenFormat, &blend);
     pipelines->present = createPipeline(m_device, "present", presentLayout.get(), present.get(), "presentVertex",
                                         "presentFragment", m_surfaceFormat, nullptr);
+    pipelines->ntsc = createPipeline(m_device, "NTSC", presentLayout.get(), ntsc.get(), "ntscVertex", "ntscFragment",
+                                     kNtscFormat, nullptr);
     return pipelines;
 }
 
@@ -385,8 +420,22 @@ void SaturnRenderer::render(Machine& machine, WGPUTexture target, std::uint32_t 
     PresentUniforms present{};
     present.viewport =
         computeViewport(settings.scale, static_cast<float>(targetWidth), static_cast<float>(targetHeight));
-    present.params = {settings.scanlines, m_surfaceIsSrgb ? 1.0f : 0.0f, 0.0f, 0.0f};
+    float scanlines = 0.0f;
+    if (settings.filter == DisplayFilter::Scanlines) scanlines = 0.3f;
+    if (settings.filter == DisplayFilter::ScanlinesStrong) scanlines = 0.6f;
+    const bool crt = settings.filter == DisplayFilter::Crt;
+    // Phosphor stripes need about three window pixels per dot, or they turn into moire.
+    const float dotWidth = present.viewport[2] / static_cast<float>(kScreenWidth);
+    const float mask = std::clamp((dotWidth - 2.0f) * 0.25f, 0.0f, 0.3f);
+    present.params = {scanlines, m_surfaceIsSrgb ? 1.0f : 0.0f, crt ? 1.0f : 0.0f,
+                      settings.ntsc ? static_cast<float>(kNtscSamplesPerDot) : 1.0f};
+    present.crt = {mask, 0.08f, 0.0f, 0.0f};
     wgpuQueueWriteBuffer(m_queue, m_presentUniforms.get(), 0, &present, sizeof(present));
+
+    // The subcarrier phase alternates every frame, which makes the dot crawl move.
+    ++m_frameCounter;
+    const NtscUniforms ntsc{{(m_frameCounter & 1u) ? 0.5f : 0.0f, 0.0f, 0.0f, 0.0f}};
+    wgpuQueueWriteBuffer(m_queue, m_ntscUniforms.get(), 0, &ntsc, sizeof(ntsc));
 
     CommandEncoder encoder(wgpuDeviceCreateCommandEncoder(m_device, nullptr));
 
@@ -411,42 +460,31 @@ void SaturnRenderer::render(Machine& machine, WGPUTexture target, std::uint32_t 
         wgpuRenderPassEncoderEnd(pass.get());
     }
 
-    {
-        TextureView targetView(wgpuTextureCreateView(target, nullptr));
+    if (settings.ntsc) {
         WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-        color.view = targetView.get();
+        color.view = m_ntscView.get();
         color.loadOp = WGPULoadOp_Clear;
         color.storeOp = WGPUStoreOp_Store;
-        color.clearValue = {0.0, 0.0, 0.0, 1.0};
         WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-        descriptor.label = view("present pass");
+        descriptor.label = view("NTSC pass");
         descriptor.colorAttachmentCount = 1;
         descriptor.colorAttachments = &color;
         RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder.get(), &descriptor));
-        wgpuRenderPassEncoderSetPipeline(pass.get(), m_pipelines->present.get());
-        wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, m_presentBindGroup.get(), 0, nullptr);
+        wgpuRenderPassEncoderSetPipeline(pass.get(), m_pipelines->ntsc.get());
+        wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, m_ntscBindGroup.get(), 0, nullptr);
         wgpuRenderPassEncoderDraw(pass.get(), 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass.get());
     }
 
+    {
+        const TextureView targetView(wgpuTextureCreateView(target, nullptr));
+        encodePresent(encoder.get(), targetView.get(), settings.ntsc);
+    }
+
     Capture* capture = nullptr;
     if (m_captureRequest) {
-        auto pending = std::make_unique<Capture>();
-        pending->callback = std::move(m_captureRequest);
-        m_captureRequest = nullptr;
-        pending->buffer = createBuffer(m_device, "capture", kCaptureRowBytes * kScreenHeight, WGPUBufferUsage_MapRead);
-
-        WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-        source.texture = m_screen.get();
-        WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
-        destination.buffer = pending->buffer.get();
-        destination.layout.bytesPerRow = kCaptureRowBytes;
-        destination.layout.rowsPerImage = kScreenHeight;
-        const WGPUExtent3D extent{static_cast<std::uint32_t>(kScreenWidth), static_cast<std::uint32_t>(kScreenHeight),
-                                  1};
-        wgpuCommandEncoderCopyTextureToBuffer(encoder.get(), &source, &destination, &extent);
-        capture = pending.get();
-        m_captures.push_back(std::move(pending));
+        encodeCapture(encoder.get(), target, targetWidth, targetHeight, settings.ntsc);
+        capture = m_captures.back().get();
     }
 
     CommandBuffer commands(wgpuCommandEncoderFinish(encoder.get(), nullptr));
@@ -461,23 +499,98 @@ void SaturnRenderer::render(Machine& machine, WGPUTexture target, std::uint32_t 
             auto* done = static_cast<Capture*>(data);
             done->done = true;
             if (status != WGPUMapAsyncStatus_Success) {
-                log::error("Framebuffer readback failed: {}", toString(message));
+                log::error("Screenshot readback failed: {}", toString(message));
                 return;
             }
-            const auto size = static_cast<std::size_t>(kCaptureRowBytes) * kScreenHeight;
+            const auto size = static_cast<std::size_t>(done->rowBytes) * done->height;
             const auto* bytes =
                 static_cast<const std::uint8_t*>(wgpuBufferGetConstMappedRange(done->buffer.get(), 0, size));
-            const std::vector<std::uint8_t> rgba(bytes, bytes + size);
+            // Drop the row padding and put the channels in RGBA order.
+            std::vector<std::uint8_t> rgba(static_cast<std::size_t>(done->width) * done->height * 4);
+            for (std::uint32_t y = 0; y < done->height; ++y) {
+                const std::uint8_t* row = bytes + static_cast<std::size_t>(y) * done->rowBytes;
+                std::uint8_t* out = rgba.data() + static_cast<std::size_t>(y) * done->width * 4;
+                for (std::uint32_t x = 0; x < done->width; ++x) {
+                    out[x * 4 + 0] = row[x * 4 + (done->bgra ? 2 : 0)];
+                    out[x * 4 + 1] = row[x * 4 + 1];
+                    out[x * 4 + 2] = row[x * 4 + (done->bgra ? 0 : 2)];
+                    out[x * 4 + 3] = 255;
+                }
+            }
             wgpuBufferUnmap(done->buffer.get());
-            done->callback(rgba, kScreenWidth, kScreenHeight);
+            done->callback(rgba, done->width, done->height);
         };
-        wgpuBufferMapAsync(capture->buffer.get(), WGPUMapMode_Read, 0, kCaptureRowBytes * kScreenHeight, callback);
+        wgpuBufferMapAsync(capture->buffer.get(), WGPUMapMode_Read, 0,
+                           static_cast<std::size_t>(capture->rowBytes) * capture->height, callback);
     }
 }
 
-void SaturnRenderer::requestCapture(CaptureCallback callback)
+void SaturnRenderer::encodePresent(WGPUCommandEncoder encoder, WGPUTextureView target, bool ntsc) const
+{
+    WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    color.view = target;
+    color.loadOp = WGPULoadOp_Clear;
+    color.storeOp = WGPUStoreOp_Store;
+    color.clearValue = {0.0, 0.0, 0.0, 1.0};
+    WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    descriptor.label = view("present pass");
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &color;
+    RenderPassEncoder pass(wgpuCommandEncoderBeginRenderPass(encoder, &descriptor));
+    wgpuRenderPassEncoderSetPipeline(pass.get(), m_pipelines->present.get());
+    wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, ntsc ? m_presentNtscBindGroup.get() : m_presentBindGroup.get(), 0,
+                                      nullptr);
+    wgpuRenderPassEncoderDraw(pass.get(), 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass.get());
+}
+
+void SaturnRenderer::encodeCapture(WGPUCommandEncoder encoder, WGPUTexture target, std::uint32_t width,
+                                   std::uint32_t height, bool ntsc)
+{
+    auto capture = std::make_unique<Capture>();
+    capture->callback = std::move(m_captureRequest);
+    m_captureRequest = nullptr;
+
+    WGPUTexture source = m_screen.get();
+    if (m_captureSource == CaptureSource::Display) {
+        // Surface textures usually can't be copied from, so draw the present pass again offscreen.
+        (void)target;
+        WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        descriptor.label = view("display capture");
+        descriptor.size = {width, height, 1};
+        descriptor.format = m_surfaceFormat;
+        descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        capture->texture.reset(wgpuDeviceCreateTexture(m_device, &descriptor));
+        const TextureView textureView(wgpuTextureCreateView(capture->texture.get(), nullptr));
+        encodePresent(encoder, textureView.get(), ntsc);
+        source = capture->texture.get();
+        capture->width = width;
+        capture->height = height;
+        capture->bgra =
+            m_surfaceFormat == WGPUTextureFormat_BGRA8Unorm || m_surfaceFormat == WGPUTextureFormat_BGRA8UnormSrgb;
+    } else {
+        capture->width = kScreenWidth;
+        capture->height = kScreenHeight;
+    }
+    capture->rowBytes = (capture->width * 4 + 255u) & ~255u;
+    capture->buffer = createBuffer(m_device, "capture", static_cast<std::uint64_t>(capture->rowBytes) * capture->height,
+                                   WGPUBufferUsage_MapRead);
+
+    WGPUTexelCopyTextureInfo from = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    from.texture = source;
+    WGPUTexelCopyBufferInfo to = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    to.buffer = capture->buffer.get();
+    to.layout.bytesPerRow = capture->rowBytes;
+    to.layout.rowsPerImage = capture->height;
+    const WGPUExtent3D extent{capture->width, capture->height, 1};
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &from, &to, &extent);
+    m_captures.push_back(std::move(capture));
+}
+
+void SaturnRenderer::requestCapture(CaptureCallback callback, CaptureSource source)
 {
     m_captureRequest = std::move(callback);
+    m_captureSource = source;
 }
 
 void SaturnRenderer::waitForCaptures(WGPUInstance instance)

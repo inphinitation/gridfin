@@ -45,6 +45,22 @@ AppOptions AppOptions::parse(int argc, char** argv)
             options.screenshotPath = argv[++i];
         } else if (arg == "--first-person") {
             options.startInFirstPerson = true;
+        } else if (arg == "--capture-display") {
+            options.captureDisplay = true;
+        } else if (arg == "--ntsc") {
+            options.present.ntsc = true;
+        } else if (arg == "--filter" && hasValue) {
+            const std::string_view name = argv[++i];
+            if (name == "sharp")
+                options.present.filter = gpu::DisplayFilter::Sharp;
+            else if (name == "scanlines")
+                options.present.filter = gpu::DisplayFilter::Scanlines;
+            else if (name == "scanlines-strong")
+                options.present.filter = gpu::DisplayFilter::ScanlinesStrong;
+            else if (name == "crt")
+                options.present.filter = gpu::DisplayFilter::Crt;
+            else
+                log::warn("Unknown filter '{}' (sharp, scanlines, scanlines-strong, crt)", name);
         } else {
             log::warn("Ignoring unknown argument '{}'", arg);
         }
@@ -85,6 +101,7 @@ SDL_AppResult App::init()
     m_input = std::make_unique<Input>(m_window);
     m_machine = std::make_unique<saturn::Machine>();
     if (!m_game.init(*m_machine)) return SDL_APP_FAILURE;
+    m_present = m_options.present;
     if (m_options.startInFirstPerson) {
         InputState toggle;
         toggle.toggleViewPressed = true;
@@ -97,7 +114,8 @@ SDL_AppResult App::init()
 
     log::info("Controls: WASD/left stick move, mouse/right stick look, Space/A jump, Shift/X run,");
     log::info("          wheel/d-pad zoom, V/Y first-third person, Esc release mouse,");
-    log::info("          F2 scanlines, F3 scaling, F4 VDP1 timing, F5 reload shaders, F11 fullscreen, F12 screenshot");
+    log::info("          F2 display filter (sharp/scanlines/CRT), F6 NTSC composite, F3 scaling, F4 VDP1 timing,");
+    log::info("          F5 reload shaders, F11 fullscreen, F12 screenshot (Shift+F12 with filters)");
     return SDL_APP_CONTINUE;
 }
 
@@ -117,7 +135,20 @@ void App::toggleFullscreen()
     SDL_SetWindowFullscreen(m_window, !fullscreen);
 }
 
-void App::requestScreenshot(std::string path)
+namespace {
+const char* filterName(gpu::DisplayFilter filter)
+{
+    switch (filter) {
+    case gpu::DisplayFilter::Sharp: return "sharp";
+    case gpu::DisplayFilter::Scanlines: return "scanlines";
+    case gpu::DisplayFilter::ScanlinesStrong: return "strong scanlines";
+    case gpu::DisplayFilter::Crt: return "CRT";
+    }
+    return "?";
+}
+} // namespace
+
+void App::requestScreenshot(std::string path, gpu::CaptureSource source)
 {
     if (!m_renderer) return;
     m_renderer->requestCapture(
@@ -130,7 +161,8 @@ void App::requestScreenshot(std::string path)
             } else {
                 log::error("Could not write screenshot {}", path);
             }
-        });
+        },
+        source);
 }
 
 SDL_AppResult App::handleEvent(const SDL_Event& event)
@@ -140,7 +172,8 @@ SDL_AppResult App::handleEvent(const SDL_Event& event)
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
         switch (event.key.scancode) {
         case SDL_SCANCODE_F2:
-            m_present.scanlines = m_present.scanlines > 0.5f ? 0.0f : m_present.scanlines + 0.3f;
+            m_present.filter = static_cast<gpu::DisplayFilter>((static_cast<int>(m_present.filter) + 1) % 4);
+            log::info("Display filter: {}", filterName(m_present.filter));
             break;
         case SDL_SCANCODE_F3:
             m_present.scale = static_cast<gpu::ScaleMode>((static_cast<int>(m_present.scale) + 1) % 3);
@@ -156,7 +189,16 @@ SDL_AppResult App::handleEvent(const SDL_Event& event)
         case SDL_SCANCODE_RETURN:
             if (event.key.mod & SDL_KMOD_ALT) toggleFullscreen();
             break;
-        case SDL_SCANCODE_F12: requestScreenshot(std::format("gridfin-{}.bmp", SDL_GetTicks())); break;
+        case SDL_SCANCODE_F6:
+            m_present.ntsc = !m_present.ntsc;
+            log::info("NTSC composite video {}", m_present.ntsc ? "on" : "off");
+            break;
+        case SDL_SCANCODE_F12:
+            // Shift+F12 saves what the window shows (with filters), F12 the raw 320x224 framebuffer.
+            requestScreenshot(std::format("gridfin-{}.bmp", SDL_GetTicks()), (event.key.mod & SDL_KMOD_SHIFT)
+                                                                                 ? gpu::CaptureSource::Display
+                                                                                 : gpu::CaptureSource::Framebuffer);
+            break;
         default: break;
         }
     }
@@ -247,7 +289,10 @@ SDL_AppResult App::iterate()
     ++m_frame;
     const bool lastFrame =
         m_options.exitAfterFrames > 0 && m_frame >= static_cast<std::uint64_t>(m_options.exitAfterFrames);
-    if (lastFrame && !m_options.screenshotPath.empty()) requestScreenshot(m_options.screenshotPath);
+    if (lastFrame && !m_options.screenshotPath.empty()) {
+        requestScreenshot(m_options.screenshotPath,
+                          m_options.captureDisplay ? gpu::CaptureSource::Display : gpu::CaptureSource::Framebuffer);
+    }
 
     presentFrame();
 

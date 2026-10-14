@@ -13,7 +13,8 @@ The renderer is not a shader filter over a modern pipeline. It models the Saturn
   There is no depth buffer: the CPU sorts polygons into an ordering table, as SGL did.
 - **VDP2** draws the backgrounds: a per-scanline colour sky, a scrolling cloud and mountain plane, and an infinite
   "rotation plane" floor.
-- Output is 320x224 pixels in 15-bit colour, shown at 4:3.
+- Output is 320x224 pixels in 15-bit colour, shown at 4:3. It can be shown as crisp pixels, with scanlines, through
+  a CRT model (beam blur, bloom, phosphor mask), and through an NTSC composite video encoder/decoder.
 - **Hardware budgets are enforced.** VDP1's drawing time is estimated each frame, and overloaded frames drop to
   30 fps. Textures live in a 1 MB work RAM budget and stream into VRAM with a per-frame DMA limit. The window title
   shows both.
@@ -79,11 +80,14 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
 | Run | Shift | Left stick click, X / Square, or left trigger |
 | Zoom; zooming all the way in gives first person | Mouse wheel | D-pad up / down |
 | Toggle first / third person | V | Y / Triangle, or right stick click |
-| Scanlines / scaling mode (4:3, integer, stretch) | F2 / F3 | |
+| Display filter: sharp, scanlines, strong scanlines, CRT | F2 | |
+| NTSC composite video on/off | F6 | |
+| Scaling mode (4:3, integer, stretch) | F3 | |
 | VDP1 timing (frame drops when VDP1 is overloaded) on/off | F4 | |
 | Reload shaders (dev builds) | F5 | |
 | Fullscreen | F11 or Alt+Enter | |
 | Save a 320x224 screenshot (`.bmp`; a download on the web) | F12 | |
+| Save a screenshot of the window, with filters | Shift+F12 | |
 
 ## Developer workflow
 
@@ -95,7 +99,9 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
 - **Tests:** `ctest --preset debug`. The engine library (`src/saturn`, `src/game`) has no SDL or GPU dependency, so
   everything up to the VDP1 command table can be unit tested.
 - **Headless runs:** `gridfin --frames 60 --screenshot out.bmp [--first-person]` renders 60 frames with a fixed time
-  step, saves the VDP framebuffer and exits. CI uses this as a smoke test on a software Vulkan driver.
+  step, saves the VDP framebuffer and exits. Add `--filter sharp|scanlines|scanlines-strong|crt`, `--ntsc` and
+  `--capture-display` to start with display filters and save the filtered window output instead. CI uses this as a
+  smoke test on a software Vulkan driver.
 - **Formatting and linting:** `.clang-format` and `.clang-tidy` are included. CI checks formatting
   (`git ls-files '*.cpp' '*.hpp' | xargs clang-format -i` fixes it).
 - **Dependency versions** are set in `cmake/Dependencies.cmake` and `cmake/WebGPU.cmake`. The wgpu-native downloads

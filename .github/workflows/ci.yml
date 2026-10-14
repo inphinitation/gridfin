@@ -55,13 +55,18 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x960x24" \
             ./build/native-ci/bin/Release/gridfin --frames 60 --screenshot gridfin-linux.bmp
           test -s gridfin-linux.bmp
+          # The window output with the CRT and NTSC filters.
+          xvfb-run -a -s "-screen 0 1280x960x24" \
+            ./build/native-ci/bin/Release/gridfin --frames 30 --filter crt --ntsc --capture-display \
+            --screenshot gridfin-linux-crt.bmp
+          test -s gridfin-linux-crt.bmp
 
       - name: Upload screenshot
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: screenshot-linux
-          path: gridfin-linux.bmp
+          path: gridfin-linux*.bmp
 
       - name: Upload build
         uses: actions/upload-artifact@v4
