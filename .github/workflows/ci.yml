@@ -93,7 +93,8 @@ jobs:
 
   deploy-pages:
     # Publishes the web build to GitHub Pages (enable Pages with "GitHub Actions" as the source).
-    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    # Runs for pushes to main and for manual runs on main (Actions > CI > Run workflow).
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: web
     runs-on: ubuntu-24.04
     permissions:
