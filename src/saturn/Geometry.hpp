@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Math.hpp"
+#include "saturn/TextureCache.hpp"
 #include "saturn/Vdp1.hpp"
 
 #include <array>
@@ -71,7 +72,7 @@ struct Lighting {
 enum class SortMode : std::uint8_t { Center, Farthest, Nearest };
 
 struct Material {
-    Texture texture{};                   ///< leave invalid for a flat polygon
+    TextureId texture = kNoTexture;      ///< kNoTexture for a flat polygon
     ColorWord color = rgb555(31, 0, 31); ///< flat polygon colour
     ColorCalc colorCalc = ColorCalc::Replace;
     bool mesh = false;
@@ -92,13 +93,23 @@ struct GeometryStats {
     std::uint32_t culledFar = 0;
     std::uint32_t culledOffscreen = 0;
     std::uint32_t overflow = 0;
+    std::uint32_t textureMisses = 0; ///< drawn flat (or skipped) because the texture wasn't in VRAM yet
+    /// Estimated VDP1 drawing time for the command list (see Vdp1Timing.hpp).
+    std::uint32_t vdp1Cycles = 0;
+
+    /// VDP1 load as a fraction of one field; above 1 the frame needs more than one field.
+    [[nodiscard]] float vdp1Load() const noexcept;
+    /// Fields (1/60 s) the frame occupies: 1 = 60 fps, 2 = 30 fps, ...
+    [[nodiscard]] std::uint32_t fieldsNeeded() const noexcept;
 };
 
 class Geometry {
 public:
     static constexpr int kOrderingTableSize = 1024;
 
-    void begin(const View& view, const Lighting& lighting);
+    /// Starts a frame. Textures are resolved through `textures` (which also begins its frame);
+    /// without a cache every textured polygon is drawn flat.
+    void begin(const View& view, const Lighting& lighting, TextureCache* textures = nullptr);
 
     /// Submits a quad. Corners A B C D map to the texture's
     /// top-left, top-right, bottom-right and bottom-left; the front face shows
@@ -124,10 +135,12 @@ private:
 
     [[nodiscard]] GouraudTable shade(const std::array<glm::vec3, 4>& viewCorners, glm::vec3 normal, bool lit) const;
     void insert(const Command& command, const GouraudTable* gouraud, float sortDepth);
-    [[nodiscard]] static Command baseCommand(CommandType type, const Material& material);
+    [[nodiscard]] static Command baseCommand(CommandType type, const Material& material, const Texture* texture);
+    [[nodiscard]] std::optional<Texture> resolve(const Material& material);
 
     View m_view;
     Lighting m_lighting;
+    TextureCache* m_textures = nullptr;
     GeometryStats m_stats;
     std::vector<Entry> m_entries;
     std::array<std::int32_t, kOrderingTableSize> m_heads{};

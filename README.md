@@ -14,6 +14,9 @@ The renderer is not a shader filter over a modern pipeline. It models the Saturn
 - **VDP2** draws the backgrounds: a per-scanline colour sky, a scrolling cloud and mountain plane, and an infinite
   "rotation plane" floor.
 - Output is 320x224 pixels in 15-bit colour, shown at 4:3.
+- **Hardware budgets are enforced.** VDP1's drawing time is estimated each frame, and overloaded frames drop to
+  30 fps. Textures live in a 1 MB work RAM budget and stream into VRAM with a per-frame DMA limit. The window title
+  shows both.
 
 See [docs/SATURN.md](docs/SATURN.md) for what is emulated and where it deviates from the real hardware.
 
@@ -77,6 +80,7 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
 | Zoom; zooming all the way in gives first person | Mouse wheel | D-pad up / down |
 | Toggle first / third person | V | Y / Triangle, or right stick click |
 | Scanlines / scaling mode (4:3, integer, stretch) | F2 / F3 | |
+| VDP1 timing (frame drops when VDP1 is overloaded) on/off | F4 | |
 | Reload shaders (dev builds) | F5 | |
 | Fullscreen | F11 or Alt+Enter | |
 | Save a 320x224 screenshot (`.bmp`; a download on the web) | F12 | |

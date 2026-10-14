@@ -312,20 +312,20 @@ void SaturnRenderer::reloadShaders()
 
 void SaturnRenderer::uploadMemory(Machine& machine)
 {
-    // VDP1: textures only change at load time; the command table and gouraud tables every frame.
+    // VDP1: the command and gouraud tables change every frame; textures only where the cache streamed them in.
     Vdp1Vram& vdp1 = machine.vdp1;
     const auto vdp1Bytes = vdp1.bytes();
-    if (vdp1.dataDirty) {
-        wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), 0, vdp1Bytes.data(), vdp1Bytes.size());
-        vdp1.dataDirty = false;
-    } else {
-        const std::uint32_t count = vdp1.commandCount();
-        wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), Vdp1Vram::kCommandTableAddress,
-                             vdp1Bytes.data() + Vdp1Vram::kCommandTableAddress, (count + 1) * 32u);
-        if (count > 0) {
-            wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), Vdp1Vram::kGouraudTableAddress,
-                                 vdp1Bytes.data() + Vdp1Vram::kGouraudTableAddress, count * 8u);
-        }
+    const std::uint32_t count = vdp1.commandCount();
+    wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), Vdp1Vram::kCommandTableAddress,
+                         vdp1Bytes.data() + Vdp1Vram::kCommandTableAddress, (count + 1) * 32u);
+    if (count > 0) {
+        wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), Vdp1Vram::kGouraudTableAddress,
+                             vdp1Bytes.data() + Vdp1Vram::kGouraudTableAddress, count * 8u);
+    }
+    for (auto [begin, end] : vdp1.takeDirtyRanges()) {
+        begin &= ~3u; // buffer writes must be 4-byte aligned
+        end = std::min((end + 3u) & ~3u, kVdp1VramSize);
+        wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), begin, vdp1Bytes.data() + begin, end - begin);
     }
 
     // VDP2: bitmaps change at load time, the line colour table every frame.

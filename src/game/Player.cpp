@@ -18,8 +18,8 @@ namespace {
     return origin + glm::vec3(local.x * c - local.z * s, local.y, local.x * s + local.z * c);
 }
 
-void drawPart(saturn::Geometry& geometry, const Aabb& local, float yaw, glm::vec3 origin, const saturn::Texture& side,
-              const saturn::Texture& front, float depthBias)
+void drawPart(saturn::Geometry& geometry, const Aabb& local, float yaw, glm::vec3 origin, saturn::TextureId side,
+              saturn::TextureId front, float depthBias)
 {
     Material material;
     material.depthBias = depthBias;

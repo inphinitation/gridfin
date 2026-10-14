@@ -2,6 +2,8 @@
 
 #include <doctest/doctest.h>
 
+#include <vector>
+
 using namespace gridfin;
 using namespace gridfin::saturn;
 
@@ -106,12 +108,75 @@ TEST_CASE("billboards become scaled sprites")
 {
     const View view = testView();
     Vdp1Vram vram;
+    TextureCache textures(vram);
+    const std::vector<std::uint8_t> pixels(32 * 64, 1);
+    const auto id = textures.addLutTexture(32, 64, pixels, Lut{});
+    REQUIRE(id);
     Geometry geometry;
-    geometry.begin(view, {});
+    geometry.begin(view, {}, &textures);
     Material material;
-    material.texture = Texture{Vdp1Vram::kDataAddress, 32, 64, ColorMode::Lut16, 0};
+    material.texture = *id;
     geometry.billboard({0.0f, -1.0f, -5.0f}, {1.0f, 2.0f}, material);
     geometry.end(vram);
     REQUIRE(vram.commandCount() == 1);
     CHECK((vram.read16(0) & 0xF) == static_cast<std::uint16_t>(CommandType::ScaledSprite));
+}
+
+TEST_CASE("textured quads fall back to a flat polygon until their texture is resident")
+{
+    const View view = testView();
+    Vdp1Vram vram;
+    TextureCache textures(vram);
+    textures.dmaBytesPerFrame = 0; // nothing can be transferred this frame
+    std::vector<std::uint8_t> pixels(16 * 16, 2);
+    Lut lut{};
+    lut[2] = rgb555(31, 0, 0);
+    const auto id = textures.addLutTexture(16, 16, pixels, lut);
+    REQUIRE(id);
+
+    Material material;
+    material.texture = *id;
+    Geometry geometry;
+    geometry.begin(view, {}, &textures);
+    geometry.quad(facingQuad(4.0f), material);
+    geometry.end(vram);
+    REQUIRE(vram.commandCount() == 1);
+    CHECK((vram.read16(0) & 0xF) == static_cast<std::uint16_t>(CommandType::Polygon));
+    CHECK(vram.read16(6) == rgb555(31, 0, 0)); // the texture's average colour
+    CHECK(geometry.stats().textureMisses == 1);
+
+    textures.dmaBytesPerFrame = TextureCache::kDefaultDmaBytesPerFrame;
+    geometry.begin(view, {}, &textures);
+    geometry.quad(facingQuad(4.0f), material);
+    geometry.end(vram);
+    CHECK((vram.read16(0) & 0xF) == static_cast<std::uint16_t>(CommandType::DistortedSprite));
+    CHECK(geometry.stats().textureMisses == 0);
+}
+
+TEST_CASE("the frame reports its VDP1 drawing time")
+{
+    const View view = testView();
+    Vdp1Vram vram;
+    Geometry geometry;
+    geometry.begin(view, {});
+    geometry.quad(facingQuad(4.0f), {});
+    geometry.end(vram);
+    CHECK(geometry.stats().vdp1Cycles > 0);
+    CHECK(geometry.stats().vdp1Load() < 1.0f);
+    CHECK(geometry.stats().fieldsNeeded() == 1);
+}
+
+TEST_CASE("an overloaded command list needs more than one field")
+{
+    const View view = testView();
+    Vdp1Vram vram;
+    Geometry geometry;
+    geometry.begin(view, {});
+    Material transparent;
+    transparent.colorCalc = ColorCalc::HalfTransparent;
+    // Screen-filling half-transparent layers: the classic way to tank a Saturn's frame rate.
+    for (int i = 0; i < 12; ++i) geometry.quad(facingQuad(1.0f + static_cast<float>(i) * 0.01f, 1.2f), transparent);
+    geometry.end(vram);
+    CHECK(geometry.stats().vdp1Load() > 1.0f);
+    CHECK(geometry.stats().fieldsNeeded() >= 2);
 }

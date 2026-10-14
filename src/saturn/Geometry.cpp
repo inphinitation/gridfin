@@ -1,5 +1,7 @@
 #include "saturn/Geometry.hpp"
 
+#include "saturn/Vdp1Timing.hpp"
+
 #include <cmath>
 
 namespace gridfin::saturn {
@@ -57,17 +59,37 @@ float View::horizonRow() const noexcept
     return kHalfHeight + focalY * std::tan(pitch);
 }
 
-void Geometry::begin(const View& view, const Lighting& lighting)
+float GeometryStats::vdp1Load() const noexcept
+{
+    return static_cast<float>(vdp1Cycles) / static_cast<float>(timing::kCyclesPerField);
+}
+
+std::uint32_t GeometryStats::fieldsNeeded() const noexcept
+{
+    return std::max<std::uint32_t>(1, (vdp1Cycles + timing::kCyclesPerField - 1) / timing::kCyclesPerField);
+}
+
+void Geometry::begin(const View& view, const Lighting& lighting, TextureCache* textures)
 {
     m_view = view;
     m_lighting = lighting;
+    m_textures = textures;
+    if (m_textures) m_textures->beginFrame();
     m_stats = {};
     m_entries.clear();
     m_heads.fill(-1);
     m_tails.fill(-1);
 }
 
-Command Geometry::baseCommand(CommandType type, const Material& material)
+std::optional<Texture> Geometry::resolve(const Material& material)
+{
+    if (material.texture == kNoTexture || !m_textures) return std::nullopt;
+    const std::optional<Texture> texture = m_textures->acquire(material.texture);
+    if (!texture) ++m_stats.textureMisses;
+    return texture;
+}
+
+Command Geometry::baseCommand(CommandType type, const Material& material, const Texture* texture)
 {
     Command command;
     command.ctrl = static_cast<std::uint16_t>(type);
@@ -75,13 +97,13 @@ Command Geometry::baseCommand(CommandType type, const Material& material)
     if (material.flipV) command.ctrl |= kFlipV;
     command.pmod = static_cast<std::uint16_t>(pmod::kEndCodeDisable | pmod::colorCalc(material.colorCalc));
     if (material.mesh) command.pmod |= pmod::kMesh;
-    if (type == CommandType::Polygon) {
+    if (!texture) {
         command.colr = material.color;
     } else {
-        command.pmod |= pmod::colorMode(material.texture.mode);
-        command.colr = material.texture.colr;
-        command.srca = material.texture.srca();
-        command.size = material.texture.size();
+        command.pmod |= pmod::colorMode(texture->mode);
+        command.colr = texture->colr;
+        command.srca = texture->srca();
+        command.size = texture->size();
     }
     return command;
 }
@@ -164,13 +186,22 @@ void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& mat
         return;
     }
 
-    Command command =
-        baseCommand(material.texture.valid() ? CommandType::DistortedSprite : CommandType::Polygon, material);
-    for (std::size_t i = 0; i < 4; ++i) {
-        if (!fitsVdp1(screen[i].x) || !fitsVdp1(screen[i].y)) {
+    for (const glm::vec2& point : screen) {
+        if (!fitsVdp1(point.x) || !fitsVdp1(point.y)) {
             ++m_stats.culledOffscreen;
             return;
         }
+    }
+
+    // Only now that the quad is known to be drawn is its texture streamed in. Until it
+    // arrives the quad is drawn as a flat polygon in the texture's average colour.
+    const std::optional<Texture> texture = resolve(material);
+    Material flat = material;
+    if (material.texture != kNoTexture && !texture && m_textures)
+        flat.color = m_textures->fallbackColor(material.texture);
+    Command command =
+        baseCommand(texture ? CommandType::DistortedSprite : CommandType::Polygon, flat, texture ? &*texture : nullptr);
+    for (std::size_t i = 0; i < 4; ++i) {
         command.xy[i * 2] = snap(screen[i].x);
         command.xy[i * 2 + 1] = snap(screen[i].y);
     }
@@ -190,7 +221,7 @@ void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& mat
 void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& material)
 {
     ++m_stats.submitted;
-    if (!material.texture.valid()) return;
+    if (material.texture == kNoTexture) return;
 
     const glm::vec3 viewBase = m_view.toView(base);
     if (viewBase.z < m_view.nearZ) {
@@ -219,7 +250,10 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
         return;
     }
 
-    Command command = baseCommand(CommandType::ScaledSprite, material);
+    // A sprite has no sensible flat fallback, so it simply pops in once its texture arrives.
+    const std::optional<Texture> texture = resolve(material);
+    if (!texture) return;
+    Command command = baseCommand(CommandType::ScaledSprite, material, &*texture);
     command.xy[0] = snap(topLeft.x);
     command.xy[1] = snap(topLeft.y);
     // Scaled sprites name their opposite corner inclusively.
@@ -239,6 +273,9 @@ void Geometry::end(Vdp1Vram& vram)
             const Entry& entry = m_entries[static_cast<std::size_t>(i)];
             if (vram.pushCommand(entry.command, entry.useGouraud ? &entry.gouraud : nullptr)) {
                 ++m_stats.drawn;
+                Command timed = entry.command;
+                if (entry.useGouraud) timed.pmod |= pmod::kGouraud;
+                m_stats.vdp1Cycles += timing::commandCycles(timed);
             } else {
                 ++m_stats.overflow;
             }

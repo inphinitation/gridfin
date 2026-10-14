@@ -37,6 +37,34 @@ the look in post-processing. This page lists what is modelled and where the emul
 - **No near-plane clipping.** A polygon with any vertex in front of the near plane is dropped.
 - **Budget.** 2047 drawable commands per frame. Overflow is counted and shown in the window title.
 
+## VDP1 drawing time: `src/saturn/Vdp1Timing.*`
+
+Every frame's command list gets an estimated VDP1 drawing time, compared against one field
+(28.64 MHz / 59.94 Hz ≈ 477,000 cycles):
+
+- each command costs a fixed fetch/decode overhead, plus a gouraud table fetch when shading is on;
+- quads and sprites are drawn line by line. A textured quad walks **at least one line per texture row** however
+  small it is on screen, so tall textures on distant polygons are expensive, as on the real chip;
+- every line costs its length in pixels plus a setup cost; shadow and half-transparency read the framebuffer and
+  cost about twice as much per pixel.
+
+When the estimate exceeds one field the frame stays on screen for as many fields as it needs, so the game drops
+to 30 fps (or lower) the way Saturn games did. The window title shows the load; **F4** switches the enforcement
+off for comparison. The constants are tuned approximations, not cycle-exact timings.
+
+## Texture streaming: `src/saturn/TextureCache.*`
+
+- Textures are registered into **work RAM** (a 1 MB budget, the low work RAM bank) in their VRAM format.
+- VDP1 VRAM's texture area (about 432 KB after the command and gouraud tables) is a **cache**. A texture is copied
+  in by "DMA" the first time a visible polygon uses it. Polygons are culled before their texture is requested, so
+  only what is on screen is transferred.
+- Each frame may transfer at most **32 KB** (`TextureCache::dmaBytesPerFrame`), roughly what fits in vertical blank.
+- When the cache is full, the least recently used textures that the current frame does not need are evicted.
+  Freed blocks are merged with their neighbours.
+- A quad whose texture has not arrived yet is drawn as a flat polygon in the texture's average colour. A sprite
+  is skipped until its texture arrives, so it pops in.
+- The renderer uploads only the VRAM byte ranges that changed.
+
 ## VDP2 (backgrounds): `src/saturn/Vdp2.*`, `shaders/vdp.wgsl`
 
 - **512 KB VRAM image and 2048-entry CRAM** (colour RAM mode 1). Bitmaps must use hardware sizes (512/1024 × 256/512).
@@ -60,4 +88,5 @@ the look in post-processing. This page lists what is modelled and where the emul
   priorities, line scroll, mosaic, colour offset) are not modelled yet.
 - No frame-rate cap: the game runs at the display's refresh rate with a fixed 60 Hz simulation. Many Saturn 3D games
   ran at 30 fps.
-- The polygon budget is a fixed command-table size, not a measurement of VDP1 fill rate.
+- VDP1 timing is an estimate, as are the DMA budget and the work RAM split. Bus contention between the CPUs, DMA
+  and VDP1 is not modelled.
