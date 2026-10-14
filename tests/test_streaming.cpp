@@ -124,3 +124,22 @@ TEST_CASE("VDP1 time grows with texture height, area and read-modify-write colou
     const std::uint32_t fullscreen = timing::commandCycles(quad(small, -160, -112, 159, 111));
     CHECK(fullscreen > timing::kCyclesPerField / 10);
 }
+
+TEST_CASE("off-screen pixels are cheap but not free")
+{
+    const std::uint16_t texture = (4u << 8) | 32u;
+    const std::uint32_t onScreen = timing::commandCycles(quad(texture, -100, -100, 99, 99)); // 200x200, all visible
+    // The same 200x200 area, mostly beyond the right edge of the screen.
+    const std::uint32_t mostlyOff = timing::commandCycles(quad(texture, 150, -100, 349, 99));
+    CHECK(mostlyOff < onScreen);
+    CHECK(mostlyOff > timing::commandCycles(quad(texture, 150, -100, 159, 99)));
+
+    // A sprite as large as VDP1 coordinates allow stays within a few fields instead of hundreds.
+    Command huge;
+    huge.ctrl = static_cast<std::uint16_t>(CommandType::ScaledSprite);
+    huge.size = (4u << 8) | 64u;
+    huge.xy = {-4096, -4096, 0, 0, 4095, 4095, 0, 0};
+    const std::uint32_t cycles = timing::commandCycles(huge);
+    CHECK(cycles > timing::kCyclesPerField); // still a real performance trap
+    CHECK(cycles < timing::kCyclesPerField * 30);
+}

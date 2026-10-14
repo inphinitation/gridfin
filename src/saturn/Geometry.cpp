@@ -224,7 +224,7 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
     if (material.texture == kNoTexture) return;
 
     const glm::vec3 viewBase = m_view.toView(base);
-    if (viewBase.z < m_view.nearZ) {
+    if (viewBase.z < std::max(m_view.nearZ, kBillboardCullDistance)) {
         ++m_stats.culledNear;
         return;
     }
@@ -254,6 +254,7 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
     const std::optional<Texture> texture = resolve(material);
     if (!texture) return;
     Command command = baseCommand(CommandType::ScaledSprite, material, &*texture);
+    if (viewBase.z < kBillboardMeshDistance) command.pmod |= pmod::kMesh;
     command.xy[0] = snap(topLeft.x);
     command.xy[1] = snap(topLeft.y);
     // Scaled sprites name their opposite corner inclusively.
