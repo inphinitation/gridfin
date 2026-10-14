@@ -64,7 +64,7 @@ cmake --build --preset web-release --target serve     # serves http://localhost:
 ```
 
 Use `web-debug` for a build with assertions and source maps. The CI publishes the web build to GitHub Pages
-when you push to the default branch (enable Pages with **GitHub Actions** as the source).
+when you push to `main` (enable Pages with **GitHub Actions** as the source).
 
 ## Controls
 
