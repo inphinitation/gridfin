@@ -1,0 +1,101 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo;Release"
+      }
+    },
+    {
+      "name": "native",
+      "displayName": "Native (Windows / Linux / macOS)",
+      "description": "Desktop build using wgpu-native. Run from a VS developer prompt on Windows.",
+      "inherits": "base",
+      "cacheVariables": {
+        "GRIDFIN_SHADER_HOT_RELOAD": "ON"
+      }
+    },
+    {
+      "name": "native-ci",
+      "displayName": "Native (CI)",
+      "inherits": "native",
+      "cacheVariables": {
+        "GRIDFIN_SHADER_HOT_RELOAD": "OFF",
+        "GRIDFIN_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "web",
+      "displayName": "Web (Emscripten + WebGPU)",
+      "description": "Browser build. Requires an activated emsdk (EMSDK environment variable).",
+      "inherits": "base",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {
+        "GRIDFIN_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "web-ci",
+      "displayName": "Web (CI)",
+      "inherits": "web",
+      "cacheVariables": {
+        "GRIDFIN_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "displayName": "Native Debug", "configurePreset": "native", "configuration": "Debug" },
+    { "name": "release", "displayName": "Native Release", "configurePreset": "native", "configuration": "Release" },
+    { "name": "ci", "configurePreset": "native-ci", "configuration": "Release" },
+    { "name": "web-debug", "displayName": "Web Debug", "configurePreset": "web", "configuration": "Debug" },
+    { "name": "web-release", "displayName": "Web Release", "configurePreset": "web", "configuration": "Release" },
+    { "name": "web-ci", "configurePreset": "web-ci", "configuration": "Release" }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "native",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci",
+      "configurePreset": "native-ci",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev",
+      "displayName": "Configure, build and test (native debug)",
+      "steps": [
+        { "type": "configure", "name": "native" },
+        { "type": "build", "name": "debug" },
+        { "type": "test", "name": "debug" }
+      ]
+    },
+    {
+      "name": "ci",
+      "steps": [
+        { "type": "configure", "name": "native-ci" },
+        { "type": "build", "name": "ci" },
+        { "type": "test", "name": "ci" }
+      ]
+    },
+    {
+      "name": "web",
+      "displayName": "Configure and build (web release)",
+      "steps": [
+        { "type": "configure", "name": "web" },
+        { "type": "build", "name": "web-release" }
+      ]
+    }
+  ]
+}

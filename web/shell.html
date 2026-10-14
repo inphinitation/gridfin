@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gridfin</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #9ff0ff; overflow: hidden;
+                 font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    canvas { display: block; outline: none; }
+    #status { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+              text-align: center; padding: 24px; pointer-events: none; white-space: pre-line; }
+    #status.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="status">Loading…</div>
+  <script>
+    const statusText = document.getElementById('status');
+    const canvas = document.getElementById('canvas');
+    if (!navigator.gpu) {
+      statusText.textContent = 'This browser does not support WebGPU.\nTry a recent Chrome, Edge, Safari or Firefox.';
+    }
+    var Module = {
+      canvas,
+      print: (text) => console.log(text),
+      printErr: (text) => console.error(text),
+      setStatus: (text) => {
+        if (!navigator.gpu) return;
+        statusText.textContent = text;
+        statusText.classList.toggle('hidden', !text);
+      },
+      onAbort: (what) => {
+        statusText.classList.remove('hidden');
+        statusText.textContent = 'Gridfin stopped: ' + what;
+      },
+    };
+    canvas.addEventListener('click', () => canvas.focus());
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

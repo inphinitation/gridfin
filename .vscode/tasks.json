@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "web: build",
+      "type": "shell",
+      "command": "cmake --preset web && cmake --build --preset web-debug",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "web: serve",
+      "type": "shell",
+      "command": "cmake --build --preset web-debug --target serve",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "format",
+      "type": "shell",
+      "command": "git ls-files '*.cpp' '*.hpp' | xargs clang-format -i",
+      "problemMatcher": []
+    }
+  ]
+}
