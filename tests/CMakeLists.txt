@@ -5,7 +5,8 @@ add_executable(gridfin_tests
     test_geometry.cpp
     test_game.cpp
     test_streaming.cpp
-    test_water.cpp)
+    test_water.cpp
+    test_sound.cpp)
 target_link_libraries(gridfin_tests PRIVATE gridfin::engine doctest::doctest)
 gridfin_set_warnings(gridfin_tests)
 

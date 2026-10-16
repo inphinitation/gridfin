@@ -1,12 +1,14 @@
 #include "app/App.hpp"
 
 #include "app/Screenshot.hpp"
+#include "app/Wav.hpp"
 #include "core/Log.hpp"
 
 #include <algorithm>
 #include <cstdlib>
 #include <format>
 #include <string_view>
+#include <vector>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/em_js.h>
@@ -53,6 +55,11 @@ AppOptions AppOptions::parse(int argc, char** argv)
             options.startAtDusk = true;
         } else if (arg == "--capture-display") {
             options.captureDisplay = true;
+        } else if (arg == "--mute") {
+            options.mute = true;
+        } else if (arg == "--render-music" && i + 2 < argc) {
+            options.renderMusicPath = argv[++i];
+            options.renderMusicSeconds = std::clamp(std::strtof(argv[++i], nullptr), 0.1f, 600.0f);
         } else if (arg == "--ntsc") {
             options.present.ntsc = true;
         } else if (arg == "--filter" && hasValue) {
@@ -77,15 +84,34 @@ AppOptions AppOptions::parse(int argc, char** argv)
 App::~App()
 {
     // GPU objects reference the window's surface, so they go first.
+    m_audio.reset();
     m_renderer.reset();
     m_gpu.reset();
     m_input.reset();
     if (m_window) SDL_DestroyWindow(m_window);
 }
 
+bool App::renderMusic() const
+{
+    Music music;
+    std::vector<std::int16_t> samples(static_cast<std::size_t>(m_options.renderMusicSeconds * saturn::kSoundSampleRate)
+                                      * 2);
+    music.render(samples);
+    const auto stats = music.driver().stats();
+    log::info("Rendered {:.1f} s of music: sound RAM {}/{} KB, {} voice steals", m_options.renderMusicSeconds,
+              music.scsp().ramUsed() / 1024, saturn::kSoundRamSize / 1024, stats.steals);
+    if (!writeWav(m_options.renderMusicPath, samples, 2, saturn::kSoundSampleRate)) {
+        log::error("Could not write {}", m_options.renderMusicPath);
+        return false;
+    }
+    log::info("Saved {}", m_options.renderMusicPath);
+    return true;
+}
+
 SDL_AppResult App::init()
 {
     SDL_SetAppMetadata("Gridfin", "0.1.0", "dev.gridfin.game");
+    if (!m_options.renderMusicPath.empty()) return renderMusic() ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         log::error("SDL_Init failed: {}", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -116,12 +142,18 @@ SDL_AppResult App::init()
         m_game.update(0.0f, toggle);
     }
 
+    // Automated runs stay silent.
+    if (!m_options.mute && m_options.exitAfterFrames == 0) {
+        m_audio = std::make_unique<AudioOutput>();
+        if (!m_audio->start()) m_audio.reset();
+    }
+
     m_gpu = std::make_unique<gpu::GpuContext>();
     if (!m_gpu->start(m_window)) return SDL_APP_FAILURE;
     m_lastTicks = SDL_GetTicksNS();
 
     log::info("Controls: WASD/left stick move, mouse/right stick look, Space/A jump, Shift/X run,");
-    log::info("          wheel/d-pad zoom, V/Y first-third person, T/Back day-dusk, Esc release mouse,");
+    log::info("          wheel/d-pad zoom, V/Y first-third person, T/Back day-dusk, M music, Esc release mouse,");
     log::info("          F2 display filter (sharp/scanlines/CRT), F6 NTSC composite, F3 scaling, F4 VDP1 timing,");
     log::info("          F5 reload shaders, F11 fullscreen, F12 screenshot (Shift+F12 with filters)");
     return SDL_APP_CONTINUE;
@@ -196,6 +228,9 @@ SDL_AppResult App::handleEvent(const SDL_Event& event)
         case SDL_SCANCODE_F11: toggleFullscreen(); break;
         case SDL_SCANCODE_RETURN:
             if (event.key.mod & SDL_KMOD_ALT) toggleFullscreen();
+            break;
+        case SDL_SCANCODE_M:
+            if (m_audio) m_audio->toggleMusic();
             break;
         case SDL_SCANCODE_F6:
             m_present.ntsc = !m_present.ntsc;

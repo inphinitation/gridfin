@@ -149,6 +149,43 @@ The VDP output is identical in every mode; these filters only model how it reach
 The filters combine: NTSC plus CRT is the "composite cable into a consumer TV" look. Both cost noticeable GPU time on
 very weak GPUs; the sharp mode is the cheapest.
 
+## Sound: `src/saturn/Scsp.*`, `src/saturn/SoundDriver.*`, `src/game/Music.*`
+
+The Saturn's audio was a separate subsystem: a Yamaha **SCSP** (YMF292) sound chip, a 68EC000 CPU running the sound
+driver, and 512 KB of sound RAM shared by both. The game's music goes through the same split.
+
+**SCSP (`saturn::Scsp`).** 32 slots, mixed at 44.1 kHz into 16-bit stereo:
+
+- **Sound RAM is a 512 KB byte image.** Samples, the driver's reserved area (64 KB for the 68000's program and
+  sequence data) and the DSP's delay lines all have to fit. The music takes about 110 KB, mostly the driver area
+  and the reverb; the samples themselves are 14 KB.
+- **Samples:** 8- or 16-bit PCM, one-shot or looping between a loop start and end address. A slot plays its
+  sample at a rate set by **OCT/FNS** (2^OCT × (1 + FNS/1024)), so pitches are quantised the way the registers
+  quantise them, with linear interpolation between samples.
+- **Envelope:** attack, decay 1, decay level, decay 2 and release, with 5-bit rates on a 10-bit attenuation scale
+  (0.094 dB per step). **Total level** attenuates in 0.375 dB steps.
+- **LFO** per slot: 32 frequencies, saw/square/triangle/noise, for vibrato (pitch) and tremolo (amplitude).
+- **FM:** a slot can offset its sample read position by another slot's output (MDL sets the depth). With sine
+  samples that is two-operator FM synthesis; the lead is an FM electric piano.
+- **Mixer:** per-slot direct send level (DISDL), pan (DIPAN, 3 dB steps) and effect send level (EFSDL); a master
+  volume; saturation at 16 bits.
+- **DSP:** a reverb program (4 comb filters and 2 allpasses per channel). Its delay lines are 16-bit words in
+  sound RAM (32 KB here), so reverb length competes with samples for memory, as it did on the hardware.
+
+**Sound driver (`saturn::SoundDriver`).** On the console the 68000 ran a driver that read sequence data, counted
+ticks on a timer and wrote key-on/off and pitch registers. This one plays tracks compiled from **MML** (Music Macro
+Language): notes with lengths and dots, rests, octave, volume, tone (`@`), gate time, tempo, pan, repeats and a loop
+point. It runs 48 ticks per quarter note, sample-accurately. Each tone ("instrument") uses one slot, or two for FM.
+When all 32 slots are busy it takes the quietest released slot, then the oldest held note.
+
+**The music (`gridfin::Music`).** All samples are generated procedurally at start-up: single-cycle waveforms for
+bass, pad and sine (the FM operators), and 8-bit, 22 kHz one-shots for the kick, snare and hi-hat, as games stored
+drums to save sound RAM. The song is nine MML tracks: lead, bass, three pad voices, drums and an arpeggio.
+
+The SDL audio callback renders the SCSP directly (on the browser's audio callback on the web; browsers start audio
+after the first click or key press). **M** toggles the music. `gridfin --render-music out.wav 30` renders 30 seconds
+offline and exits.
+
 ## Known deviations
 
 - Memory images are **little-endian**; the Saturn is big-endian. Field layouts are otherwise the same.
@@ -169,3 +206,7 @@ very weak GPUs; the sharp mode is the cheapest.
   ran at 30 fps.
 - VDP1 timing is an estimate, as are the DMA budget and the work RAM split. Bus contention between the CPUs, DMA
   and VDP1 is not modelled.
+- The SCSP model renders per slot in floating point, so it isn't bit-exact. The envelope, LFO and FM curves follow
+  the register ranges but are approximations. The DSP runs a fixed reverb program instead of executing
+  microcode; sound RAM holds 16-bit samples little-endian. The sound driver runs natively instead of as 68000 code,
+  and there is no CD audio (Red Book tracks), which many Saturn games used for music instead.

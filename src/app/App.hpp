@@ -3,6 +3,7 @@
 #include "game/Game.hpp"
 #include "gfx/GpuContext.hpp"
 #include "gfx/SaturnRenderer.hpp"
+#include "platform/Audio.hpp"
 #include "platform/Input.hpp"
 #include "saturn/Machine.hpp"
 
@@ -24,6 +25,9 @@ struct AppOptions {
     std::optional<std::array<float, 3>> spawn; ///< x, z, yaw in degrees
     bool captureDisplay = false;               ///< screenshot the filtered window output instead of the framebuffer
     gpu::PresentSettings present{};            ///< initial display settings
+    bool mute = false;                         ///< don't open an audio device
+    std::string renderMusicPath;               ///< render the music to a WAV file and exit
+    float renderMusicSeconds = 30.0f;
 
     [[nodiscard]] static AppOptions parse(int argc, char** argv);
 };
@@ -47,10 +51,12 @@ private:
     void requestScreenshot(std::string path, gpu::CaptureSource source);
     void toggleFullscreen();
     void presentFrame();
+    [[nodiscard]] bool renderMusic() const;
 
     AppOptions m_options;
     SDL_Window* m_window = nullptr;
     std::unique_ptr<Input> m_input;
+    std::unique_ptr<AudioOutput> m_audio;
     std::unique_ptr<gpu::GpuContext> m_gpu;
     std::unique_ptr<gpu::SaturnRenderer> m_renderer;
     gpu::PresentSettings m_present;

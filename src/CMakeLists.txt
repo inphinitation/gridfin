@@ -7,6 +7,10 @@ add_library(gridfin_engine STATIC
     saturn/Geometry.cpp
     saturn/Geometry.hpp
     saturn/Machine.hpp
+    saturn/Scsp.cpp
+    saturn/Scsp.hpp
+    saturn/SoundDriver.cpp
+    saturn/SoundDriver.hpp
     saturn/TextureCache.cpp
     saturn/TextureCache.hpp
     saturn/Vdp1.cpp
@@ -24,6 +28,8 @@ add_library(gridfin_engine STATIC
     game/Game.cpp
     game/Game.hpp
     game/InputState.hpp
+    game/Music.cpp
+    game/Music.hpp
     game/Player.cpp
     game/Player.hpp
     game/World.cpp
@@ -40,12 +46,16 @@ add_executable(gridfin
     app/App.hpp
     app/Screenshot.cpp
     app/Screenshot.hpp
+    app/Wav.cpp
+    app/Wav.hpp
     gfx/GpuContext.cpp
     gfx/GpuContext.hpp
     gfx/SaturnRenderer.cpp
     gfx/SaturnRenderer.hpp
     gfx/Surface.cpp
     gfx/WebGpu.hpp
+    platform/Audio.cpp
+    platform/Audio.hpp
     platform/Input.cpp
     platform/Input.hpp)
 target_link_libraries(gridfin PRIVATE gridfin::engine gridfin::webgpu SDL3::SDL3)
