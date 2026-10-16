@@ -1,0 +1,6 @@
+; Drum: an 8-bit, 22 kHz one-shot imported from a WAVE file.
+program = 3
+sample = ../samples/kick.wav
+fixed-pitch = true
+release = 14
+level = 24

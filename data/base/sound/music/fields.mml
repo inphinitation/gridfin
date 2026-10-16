@@ -1,0 +1,34 @@
+#title Gridfin Fields
+; A minor at 104 bpm. Four bars of intro, then an eight-bar loop.
+; Progression: Am F C G | Am F C E. Programs (@) are defined in sound/tones/.
+
+#track lead
+; FM electric piano.
+t104 @1 v13 q7 o4 l4 r1 r1 r1 r1 L
+e4. a8 b4 >c4< | a4 g8 f8 e4 c4 | e4. g8 >c4< b4 | a2 g4 r4 |
+a8 >c8 e4 d8 c8 <b4 | a4 >c4< a4 f4 | g4. e8 g4 >c4< | b4 a4 g+4 e4
+
+#track bass
+; Octave eighths.
+@0 v14 q6 o2 l8 [a>a<]4 [f>f<]4 >[c>c<]4< [g>g<]4 L
+[a>a<]4 [f>f<]4 >[c>c<]4< [g>g<]4 | [a>a<]4 [f>f<]4 >[c>c<]4< [e>e<]4
+
+; Pads: three voices of whole-note chords, spread across the stereo field.
+#track pad-low
+@2 v11 q8 p-6 o3 l1 a a g g L a a g g a a g g+
+#track pad-mid
+@2 v11 q8 o4 l1 c c c <b> L c c c <b> c c c <b>
+#track pad-high
+@2 v11 q8 p6 o4 l1 e f e d L e f e d e f e e
+
+#track kick
+@3 v15 q8 l8 r1 r1 [crrrcrrr]2 L [crrrcrrr]7 crrrcrcc
+#track snare
+@4 v13 q8 l8 r1 r1 r1 r2 r8 ccc L [rrcrrrcr]7 rrcrrccc
+#track hats
+@5 v11 q4 p4 l8 r1 r1 [v11c v7c]8 L [v11c v7c]32
+
+#track arpeggio
+; A sparse arpeggio that answers the lead in the loop, two octaves up.
+@1 v12 q3 p-9 o5 l8 r1 r1 r1 r1 L
+r2 r8 e a >c< | r1 | r2 r8 g >c e< | r1 | r2 r8 e a >c< | r1 | r2 r8 g >c e< | r2 r8 b >e g+<

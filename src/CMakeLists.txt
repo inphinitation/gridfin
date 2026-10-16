@@ -2,11 +2,23 @@
 add_library(gridfin_engine STATIC
     core/Log.hpp
     core/Math.hpp
+    data/Archive.cpp
+    data/Archive.hpp
+    data/Config.cpp
+    data/Config.hpp
+    data/Vfs.cpp
+    data/Vfs.hpp
+    data/Wav.cpp
+    data/Wav.hpp
     saturn/Color.hpp
     saturn/Hardware.hpp
     saturn/Geometry.cpp
     saturn/Geometry.hpp
     saturn/Machine.hpp
+    saturn/Scsp.cpp
+    saturn/Scsp.hpp
+    saturn/SoundDriver.cpp
+    saturn/SoundDriver.hpp
     saturn/TextureCache.cpp
     saturn/TextureCache.hpp
     saturn/Vdp1.cpp
@@ -24,8 +36,12 @@ add_library(gridfin_engine STATIC
     game/Game.cpp
     game/Game.hpp
     game/InputState.hpp
+    game/Music.cpp
+    game/Music.hpp
     game/Player.cpp
     game/Player.hpp
+    game/SoundBank.cpp
+    game/SoundBank.hpp
     game/World.cpp
     game/World.hpp)
 add_library(gridfin::engine ALIAS gridfin_engine)
@@ -46,6 +62,8 @@ add_executable(gridfin
     gfx/SaturnRenderer.hpp
     gfx/Surface.cpp
     gfx/WebGpu.hpp
+    platform/Audio.cpp
+    platform/Audio.hpp
     platform/Input.cpp
     platform/Input.hpp)
 target_link_libraries(gridfin PRIVATE gridfin::engine gridfin::webgpu SDL3::SDL3)
@@ -60,8 +78,14 @@ gridfin_embed_files(gridfin
         ../shaders/present.wgsl)
 
 if(GRIDFIN_SHADER_HOT_RELOAD AND NOT EMSCRIPTEN)
-    target_compile_definitions(gridfin PRIVATE GRIDFIN_SHADER_DIR="${PROJECT_SOURCE_DIR}/shaders")
+    # Dev builds read shaders and game data straight from the source tree, so edits reload live.
+    target_compile_definitions(gridfin PRIVATE
+        GRIDFIN_SHADER_DIR="${PROJECT_SOURCE_DIR}/shaders"
+        GRIDFIN_DATA_DIR="${PROJECT_SOURCE_DIR}/data/base")
 endif()
+
+# --- Game data -------------------------------------------------------------------------------
+file(GLOB_RECURSE GRIDFIN_BASE_DATA CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/data/base/*")
 
 set_target_properties(gridfin PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/$<CONFIG>"
@@ -83,8 +107,10 @@ if(EMSCRIPTEN)
         -sENVIRONMENT=web
         "$<$<CONFIG:Debug>:-sASSERTIONS=2>"
         "$<$<CONFIG:Debug>:-gsource-map>"
-        "$<$<CONFIG:Release>:--closure=1>")
-    set_property(TARGET gridfin APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/shell.html")
+        "$<$<CONFIG:Release>:--closure=1>"
+        # The base game data, fetched with the page and mounted at /data/base.
+        "--preload-file=${PROJECT_SOURCE_DIR}/data/base@/data/base")
+    set_property(TARGET gridfin APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/web/shell.html" ${GRIDFIN_BASE_DATA})
 
     # `cmake --build --preset web-release --target serve` then open http://localhost:8080
     find_package(Python3 COMPONENTS Interpreter)
@@ -96,6 +122,16 @@ if(EMSCRIPTEN)
             COMMENT "Serving the web build at http://localhost:8080")
     endif()
 else()
+    # Pack the base game into base.gfa next to the executable, with the game's own packer.
+    set(GRIDFIN_BASE_ARCHIVE "${PROJECT_BINARY_DIR}/bin/$<CONFIG>/base.gfa")
+    add_custom_command(
+        OUTPUT "${GRIDFIN_BASE_ARCHIVE}"
+        COMMAND gridfin --pack "${PROJECT_SOURCE_DIR}/data/base" "${GRIDFIN_BASE_ARCHIVE}"
+        DEPENDS gridfin ${GRIDFIN_BASE_DATA}
+        COMMENT "Packing data/base into base.gfa"
+        VERBATIM)
+    add_custom_target(gridfin_data ALL DEPENDS "${GRIDFIN_BASE_ARCHIVE}")
+
     add_custom_target(run
         COMMAND gridfin
         DEPENDS gridfin

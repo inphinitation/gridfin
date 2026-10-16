@@ -21,11 +21,20 @@ The renderer is not a shader filter over a modern pipeline. It models the Saturn
 - **Reflections the Saturn way:** a pond whose outline becomes a VDP2 line window. Inside it, a line-scrolled
   layer mirrors the sky with ripples, and the objects around the pond are drawn mirrored and clipped under a mesh
   water surface. Glossy materials get specular highlights through the gouraud tables.
+- **Music the Saturn way:** sequenced music on a model of the SCSP sound chip: 32 slots playing procedurally
+  generated samples from 512 KB of sound RAM, with envelopes, LFOs, two-operator FM and a reverb DSP, driven
+  by a sound driver that plays MML sequences.
 - **Hardware budgets are enforced.** VDP1's drawing time is estimated each frame, and overloaded frames drop to
   30 fps. Textures live in a 1 MB work RAM budget and stream into VRAM with a per-frame DMA limit. The window title
   shows both.
 
-See [docs/SATURN.md](docs/SATURN.md) for what is emulated and where it deviates from the real hardware.
+The executable is an engine that plays a game from its **data**: a source folder of small text files while you
+edit (changes reload live), packed into a single archive to ship, with mods layered on top. The base game is in
+`data/base/`.
+
+See [docs/SATURN.md](docs/SATURN.md) for what is emulated and where it deviates from the real hardware,
+[docs/DATA.md](docs/DATA.md) for the data folder and archive format, and [docs/SOUND.md](docs/SOUND.md) for tone
+files and MML.
 
 ## Tech stack
 
@@ -33,7 +42,7 @@ See [docs/SATURN.md](docs/SATURN.md) for what is emulated and where it deviates 
 | --- | --- |
 | Language | C++23 |
 | Build | CMake ≥ 3.25 with presets, Ninja Multi-Config, dependencies fetched automatically |
-| Window, input, gamepads, main loop | [SDL3](https://libsdl.org) (desktop and Emscripten) |
+| Window, input, gamepads, audio, main loop | [SDL3](https://libsdl.org) (desktop and Emscripten) |
 | Graphics | WebGPU (`webgpu.h`): [wgpu-native](https://github.com/gfx-rs/wgpu-native) on desktop (Vulkan / Metal / D3D12), Dawn's [emdawnwebgpu](https://dawn.googlesource.com/dawn/+/refs/heads/main/src/emdawnwebgpu/) in the browser |
 | Shaders | WGSL, embedded at build time, hot-reloadable in dev builds |
 | Web | Emscripten (`--use-port=emdawnwebgpu`) |
@@ -87,6 +96,7 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
 | Zoom; zooming all the way in gives first person | Mouse wheel | D-pad up / down |
 | Toggle first / third person | V | Y / Triangle, or right stick click |
 | Toggle day / dusk | T | Back / Select |
+| Music on/off | M | |
 | Display filter: sharp, scanlines, strong scanlines, CRT | F2 | |
 | NTSC composite video on/off | F6 | |
 | Scaling mode (4:3, integer, stretch) | F3 | |
@@ -108,7 +118,12 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
 - **Headless runs:** `gridfin --frames 60 --screenshot out.bmp [--first-person] [--dusk] [--spawn x z yaw]` renders 60 frames with a fixed time
   step, saves the VDP framebuffer and exits. Add `--filter sharp|scanlines|scanlines-strong|crt`, `--ntsc` and
   `--capture-display` to start with display filters and save the filtered window output instead. CI uses this as a
-  smoke test on a software Vulkan driver.
+  smoke test on a software Vulkan driver. `--mute` runs without opening an audio device.
+- **Game data:** dev builds read `data/base/` from the source tree and reload edited files live. Other builds use
+  `base.gfa`, which the build packs next to the executable (`gridfin --pack <folder> <file.gfa>` does it by hand).
+  `--data <folder or .gfa>` mounts data explicitly; repeat it to layer a mod over the base game.
+- **Music:** `gridfin --render-music out.wav 30` renders 30 seconds of the soundtrack to a WAV file and exits,
+  without opening a window. The song is `data/base/sound/music/fields.mml`.
 - **Formatting and linting:** `.clang-format` and `.clang-tidy` are included. CI checks formatting
   (`git ls-files '*.cpp' '*.hpp' | xargs clang-format -i` fixes it).
 - **Dependency versions** are set in `cmake/Dependencies.cmake` and `cmake/WebGPU.cmake`. The wgpu-native downloads
@@ -118,12 +133,16 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
 
 ```
 cmake/            Build helpers: dependencies, WebGPU provider, warnings, shader embedding
+data/base/        The base game's data: manifest, tones, samples, songs
 shaders/          WGSL: vdp.wgsl (VDP1 + VDP2), present.wgsl (scaling to the window)
 src/core/         Logging, math helpers
-src/saturn/       The emulated hardware model: VDP1/VDP2 memory, command format, geometry stage
-src/game/         Game logic: assets (procedural, in Saturn formats), world, player, camera rig
+src/data/         Virtual file system, archives, the config format, WAVE files
+src/saturn/       The emulated hardware model: VDP1/VDP2 memory, command format, geometry stage, SCSP sound
+                  chip and sound driver
+src/game/         Game logic: assets (procedural, in Saturn formats), sound bank and music, world, player,
+                  camera rig
 src/gfx/          WebGPU: device bring-up, window surfaces, the renderer that executes the VDP model
-src/platform/     SDL3 input mapping (keyboard, mouse, gamepads)
+src/platform/     SDL3 input mapping (keyboard, mouse, gamepads) and audio output
 src/app/          App lifecycle, screenshots
 tests/            doctest unit tests
 web/shell.html    The page hosting the web build

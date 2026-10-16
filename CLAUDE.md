@@ -12,6 +12,7 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
   `xvfb-run ./build/native/bin/Debug/gridfin --frames 60 --screenshot out.bmp`. To check display filters, add
   `--filter crt --ntsc --capture-display` (saves the filtered window output instead of the framebuffer). Place the
   player with `--spawn x z yawDegrees` (e.g. `--spawn -4.5 5 0 --first-person` looks across the pond).
+- Render the music offline: `./build/native/bin/Debug/gridfin --render-music out.wav 30` (no window needed).
 - Format before committing: `git ls-files '*.cpp' '*.hpp' | xargs clang-format -i`.
   Wrap JavaScript inside `EM_JS` in `// clang-format off/on` (the formatter breaks `=>`).
 
@@ -29,6 +30,12 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
   tints and fades use the VDP2 colour offset registers. Animate colours by palette cycling (`TextureCache::setLut`),
   not by shader effects. Reflections are mirrored geometry between `Geometry::beginReflection/endReflection`,
   clipped to a CPU-computed VDP2 line window (`saturn::computeLineWindow`).
+- Game content is data, not code: it lives in `data/base/` and is read through `data::Vfs` (folders or `.gfa`
+  archives, later mounts override earlier ones). Formats are documented in `docs/DATA.md` and `docs/SOUND.md`;
+  update them with any format change. Loaders report problems as `file:line: message` and keep going.
+- Audio goes through the SCSP model: samples live in `saturn::Scsp` sound RAM (512 KB, shared with the driver area
+  and the reverb delay lines), music is MML played by `saturn::SoundDriver` on its 32 slots. No host-side mixing or
+  effects; `platform/Audio` only copies the SCSP output to SDL.
 - `shaders/vdp.wgsl` decodes the same bytes the CPU writes; if you change a memory layout, update both sides and the
   uniform mirrors (`FrameUniforms` in `src/gfx/SaturnRenderer.cpp`).
 - Code against the standard `webgpu.h`; anything implementation specific must be behind `GRIDFIN_WGPU_NATIVE` or

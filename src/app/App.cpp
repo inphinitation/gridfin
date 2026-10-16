@@ -2,11 +2,16 @@
 
 #include "app/Screenshot.hpp"
 #include "core/Log.hpp"
+#include "data/Archive.hpp"
+#include "data/Config.hpp"
+#include "data/Wav.hpp"
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <string_view>
+#include <vector>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/em_js.h>
@@ -53,6 +58,16 @@ AppOptions AppOptions::parse(int argc, char** argv)
             options.startAtDusk = true;
         } else if (arg == "--capture-display") {
             options.captureDisplay = true;
+        } else if (arg == "--mute") {
+            options.mute = true;
+        } else if (arg == "--render-music" && i + 2 < argc) {
+            options.renderMusicPath = argv[++i];
+            options.renderMusicSeconds = std::clamp(std::strtof(argv[++i], nullptr), 0.1f, 600.0f);
+        } else if (arg == "--data" && hasValue) {
+            options.dataPaths.emplace_back(argv[++i]);
+        } else if (arg == "--pack" && i + 2 < argc) {
+            options.packFolder = argv[++i];
+            options.packArchive = argv[++i];
         } else if (arg == "--ntsc") {
             options.present.ntsc = true;
         } else if (arg == "--filter" && hasValue) {
@@ -77,15 +92,93 @@ AppOptions AppOptions::parse(int argc, char** argv)
 App::~App()
 {
     // GPU objects reference the window's surface, so they go first.
+    m_audio.reset();
     m_renderer.reset();
     m_gpu.reset();
     m_input.reset();
     if (m_window) SDL_DestroyWindow(m_window);
 }
 
+bool App::renderMusic() const
+{
+    Music music(m_data);
+    for (const std::string& error : music.errors()) log::warn("{}", error);
+    std::vector<std::int16_t> samples(static_cast<std::size_t>(m_options.renderMusicSeconds * saturn::kSoundSampleRate)
+                                      * 2);
+    music.render(samples);
+    const auto stats = music.driver().stats();
+    log::info("Rendered {:.1f} s of music: sound RAM {}/{} KB, {} voice steals", m_options.renderMusicSeconds,
+              music.scsp().ramUsed() / 1024, saturn::kSoundRamSize / 1024, stats.steals);
+    if (!data::writeWav(m_options.renderMusicPath, samples, 2, saturn::kSoundSampleRate)) {
+        log::error("Could not write {}", m_options.renderMusicPath);
+        return false;
+    }
+    log::info("Saved {}", m_options.renderMusicPath);
+    return true;
+}
+
+bool App::mountData()
+{
+    // Explicit --data paths, in order (later ones override earlier ones).
+    for (const std::string& path : m_options.dataPaths) {
+        std::string error;
+        if (!m_data.mountPath(path, &error)) {
+            log::error("Cannot mount {}", error);
+            return false;
+        }
+        log::info("Mounted {}", path);
+    }
+    if (!m_data.empty()) return true;
+
+    // Otherwise the base game: the source folder in dev builds (so edits reload live), else the
+    // packed archive next to the executable, else a data folder (the web build preloads one).
+    std::vector<std::filesystem::path> candidates;
+#if defined(GRIDFIN_DATA_DIR)
+    candidates.emplace_back(GRIDFIN_DATA_DIR);
+#endif
+    if (const char* base = SDL_GetBasePath()) {
+        candidates.push_back(std::filesystem::path(base) / "base.gfa");
+        candidates.push_back(std::filesystem::path(base) / "data" / "base");
+    }
+    candidates.emplace_back("data/base");
+    for (const auto& path : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) continue;
+        std::string error;
+        if (m_data.mountPath(path, &error)) {
+            log::info("Game data: {}", path.string());
+            return true;
+        }
+        log::warn("Cannot mount {}", error);
+    }
+    log::error("No game data found (looked for base.gfa or data/base); pass --data <folder or .gfa>");
+    return false;
+}
+
+void App::reloadChangedData()
+{
+    const auto changed = m_data.pollChanges();
+    if (changed.empty()) return;
+    for (const std::string& path : changed) log::info("Changed: {}", path);
+    const bool sound = std::ranges::any_of(
+        changed, [](const std::string& path) { return path.starts_with("sound/") || path == "gridfin.cfg"; });
+    if (sound && m_audio) m_audio->reload(m_data);
+}
+
 SDL_AppResult App::init()
 {
     SDL_SetAppMetadata("Gridfin", "0.1.0", "dev.gridfin.game");
+    if (!m_options.packFolder.empty()) {
+        std::string error;
+        if (!data::packDirectory(m_options.packFolder, m_options.packArchive, &error)) {
+            log::error("Packing failed: {}", error);
+            return SDL_APP_FAILURE;
+        }
+        log::info("Packed {} into {}", m_options.packFolder, m_options.packArchive);
+        return SDL_APP_SUCCESS;
+    }
+    if (!mountData()) return SDL_APP_FAILURE;
+    if (!m_options.renderMusicPath.empty()) return renderMusic() ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         log::error("SDL_Init failed: {}", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -116,12 +209,18 @@ SDL_AppResult App::init()
         m_game.update(0.0f, toggle);
     }
 
+    // Automated runs stay silent.
+    if (!m_options.mute && m_options.exitAfterFrames == 0) {
+        m_audio = std::make_unique<AudioOutput>();
+        if (!m_audio->start(m_data)) m_audio.reset();
+    }
+
     m_gpu = std::make_unique<gpu::GpuContext>();
     if (!m_gpu->start(m_window)) return SDL_APP_FAILURE;
     m_lastTicks = SDL_GetTicksNS();
 
     log::info("Controls: WASD/left stick move, mouse/right stick look, Space/A jump, Shift/X run,");
-    log::info("          wheel/d-pad zoom, V/Y first-third person, T/Back day-dusk, Esc release mouse,");
+    log::info("          wheel/d-pad zoom, V/Y first-third person, T/Back day-dusk, M music, Esc release mouse,");
     log::info("          F2 display filter (sharp/scanlines/CRT), F6 NTSC composite, F3 scaling, F4 VDP1 timing,");
     log::info("          F5 reload shaders, F11 fullscreen, F12 screenshot (Shift+F12 with filters)");
     return SDL_APP_CONTINUE;
@@ -196,6 +295,9 @@ SDL_AppResult App::handleEvent(const SDL_Event& event)
         case SDL_SCANCODE_F11: toggleFullscreen(); break;
         case SDL_SCANCODE_RETURN:
             if (event.key.mod & SDL_KMOD_ALT) toggleFullscreen();
+            break;
+        case SDL_SCANCODE_M:
+            if (m_audio) m_audio->toggleMusic();
             break;
         case SDL_SCANCODE_F6:
             m_present.ntsc = !m_present.ntsc;
@@ -313,6 +415,13 @@ SDL_AppResult App::iterate()
         // Give the screenshot readback a chance to complete before quitting.
         m_renderer->waitForCaptures(m_gpu->instance());
         m_quitRequested = true;
+    }
+
+    // Live reload of edited source folders, twice a second.
+    m_reloadTimer += dt;
+    if (m_reloadTimer >= 0.5f && m_options.exitAfterFrames == 0) {
+        m_reloadTimer = 0.0f;
+        reloadChangedData();
     }
 
     updateTitle(dt);

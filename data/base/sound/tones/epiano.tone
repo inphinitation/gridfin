@@ -1,0 +1,17 @@
+; FM electric piano: a sine carrier modulated by a sine at the same pitch. The modulator
+; decays faster than the carrier, so the attack is bright and the tail mellow.
+program = 1
+wave = 1
+decay1 = 9
+release = 18
+level = 30
+fm-depth = 10
+reverb = 5
+lfo-rate = 17
+vibrato = 1
+
+[modulator]
+wave = 1
+decay1 = 15
+decay-level = 12
+decay2 = 9

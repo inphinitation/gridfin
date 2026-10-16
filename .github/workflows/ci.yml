@@ -69,13 +69,18 @@ jobs:
             ./build/native-ci/bin/Release/gridfin --frames 60 --first-person --spawn -4.5 5 0 \
             --screenshot gridfin-linux-pond.bmp
           test -s gridfin-linux-pond.bmp
+          # The soundtrack, rendered offline through the SCSP model.
+          ./build/native-ci/bin/Release/gridfin --render-music gridfin-music.wav 40
+          test -s gridfin-music.wav
 
       - name: Upload screenshot
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: screenshot-linux
-          path: gridfin-linux*.bmp
+          path: |
+            gridfin-linux*.bmp
+            gridfin-music.wav
 
       - name: Upload build
         uses: actions/upload-artifact@v4
