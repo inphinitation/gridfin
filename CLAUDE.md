@@ -10,7 +10,8 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
 - CI equivalent with warnings as errors: `cmake --workflow --preset ci`.
 - Headless smoke test (Linux, needs Xvfb + a Vulkan driver such as lavapipe):
   `xvfb-run ./build/native/bin/Debug/gridfin --frames 60 --screenshot out.bmp`. To check display filters, add
-  `--filter crt --ntsc --capture-display` (saves the filtered window output instead of the framebuffer).
+  `--filter crt --ntsc --capture-display` (saves the filtered window output instead of the framebuffer). Place the
+  player with `--spawn x z yawDegrees` (e.g. `--spawn -4.5 5 0 --first-person` looks across the pond).
 - Format before committing: `git ls-files '*.cpp' '*.hpp' | xargs clang-format -i`.
   Wrap JavaScript inside `EM_JS` in `// clang-format off/on` (the formatter breaks `=>`).
 
@@ -24,6 +25,10 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
   2047 commands per frame. Assets are generated procedurally into Saturn formats in `src/game/Assets.cpp`.
 - VDP1 textures are registered in `saturn::TextureCache` (work RAM) and referenced by `TextureId`; never write
   textures into `Vdp1Vram` directly. Watch the VDP1 load in the window title: over 100% halves the frame rate.
+- Lighting is CPU-side, through gouraud tables (`saturn::Lighting`: sun, at most 4 point lights, haze). Screen-wide
+  tints and fades use the VDP2 colour offset registers. Animate colours by palette cycling (`TextureCache::setLut`),
+  not by shader effects. Reflections are mirrored geometry between `Geometry::beginReflection/endReflection`,
+  clipped to a CPU-computed VDP2 line window (`saturn::computeLineWindow`).
 - `shaders/vdp.wgsl` decodes the same bytes the CPU writes; if you change a memory layout, update both sides and the
   uniform mirrors (`FrameUniforms` in `src/gfx/SaturnRenderer.cpp`).
 - Code against the standard `webgpu.h`; anything implementation specific must be behind `GRIDFIN_WGPU_NATIVE` or

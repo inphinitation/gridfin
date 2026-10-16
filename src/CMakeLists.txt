@@ -15,6 +15,8 @@ add_library(gridfin_engine STATIC
     saturn/Vdp1Timing.hpp
     saturn/Vdp2.cpp
     saturn/Vdp2.hpp
+    saturn/Window.cpp
+    saturn/Window.hpp
     game/Assets.cpp
     game/Assets.hpp
     game/CameraRig.cpp

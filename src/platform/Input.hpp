@@ -41,6 +41,7 @@ private:
     float m_wheel = 0.0f;
     bool m_jumpPressed = false;
     bool m_togglePressed = false;
+    bool m_duskPressed = false;
     int m_dpadZoom = 0;
     InputDevice m_device = InputDevice::KeyboardMouse;
 };

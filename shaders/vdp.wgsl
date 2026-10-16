@@ -15,7 +15,17 @@ struct Frame {
     sky: vec4f,        // NBG0 scroll x, horizon row, unused, unused
     vdp2: vec4u,       // ground bitmap address, cloud bitmap address, line colour table address, layer enable bits
     sizes: vec4u,      // ground size (w | h << 16), cloud size, ground bank | cloud bank << 16, haze colour
+    offsetA: vec4i,    // colour offset A (r, g, b in 8-bit steps), layer enable bits
+    offsetB: vec4i,    // colour offset B (r, g, b in 8-bit steps), layer select bits (1 = use B)
+    water: vec4u,      // window table address, reflection line scroll address, water colour, ratio | enabled << 8
 }
+
+// Layer bits of the colour offset registers.
+const kLayerBack = 1u;
+const kLayerNbg0 = 2u;
+const kLayerRbg0 = 4u;
+const kLayerSprite = 8u;
+const kLayerNbg1 = 16u;
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<storage, read> vdp1Vram: array<u32>;
@@ -62,6 +72,38 @@ fn resolveColor(code: u32) -> vec3f {
     return rgb5(cramWord(code));
 }
 
+/// VDP2 colour offset: adds a signed 8-bit offset to a layer's colour (here in 0..31 units).
+fn colorOffset(color: vec3f, layer: u32) -> vec3f {
+    if (u32(frame.offsetA.w) & layer) == 0u {
+        return color;
+    }
+    let offset = select(frame.offsetA.xyz, frame.offsetB.xyz, (u32(frame.offsetB.w) & layer) != 0u);
+    return clamp(color + vec3f(offset) * (31.0 / 255.0), vec3f(0.0), vec3f(31.0));
+}
+
+/// Window 0, a line window: a [start, end) span per scanline in VDP2 VRAM.
+fn insideWindow(pixel: vec2u) -> bool {
+    let entry = frame.water.x + pixel.y * 4u;
+    return pixel.x >= vdp2Word(entry) && pixel.x < vdp2Word(entry + 2u);
+}
+
+/// NBG0 at screen position (x, y): a bitmap whose bottom row rests on the horizon, scrolled
+/// horizontally with the camera yaw. Alpha is 0 where the bitmap is transparent or absent.
+fn nbg0Pixel(x: f32, y: f32) -> vec4f {
+    let width = frame.sizes.y & 0xFFFFu;
+    let height = frame.sizes.y >> 16u;
+    let row = i32(floor(y - frame.sky.y)) + i32(height);
+    if row < 0 || row >= i32(height) {
+        return vec4f(0.0);
+    }
+    let column = u32(i32(floor(x + frame.sky.x)) & i32(width - 1u));
+    let index = vdp2Byte(frame.vdp2.y + u32(row) * width + column);
+    if index == 0u {
+        return vec4f(0.0);
+    }
+    return vec4f(rgb5(cramWord((frame.sizes.z >> 16u) + index)), 1.0);
+}
+
 // --- VDP2 ----------------------------------------------------------------------
 
 @vertex
@@ -77,18 +119,14 @@ fn vdp2Fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
 
     // Back screen: one colour per scanline.
     var color = rgb5(vdp2Word(frame.vdp2.z + pixel.y * 2u));
+    var layer = kLayerBack;
 
     // NBG0: a bitmap whose bottom row rests on the horizon, scrolled by camera yaw.
     if (layers & 2u) != 0u {
-        let width = frame.sizes.y & 0xFFFFu;
-        let height = frame.sizes.y >> 16u;
-        let row = i32(floor(position.y - frame.sky.y)) + i32(height);
-        if row >= 0 && row < i32(height) {
-            let column = u32(i32(floor(position.x + frame.sky.x)) & i32(width - 1u));
-            let index = vdp2Byte(frame.vdp2.y + u32(row) * width + column);
-            if index != 0u {
-                color = rgb5(cramWord((frame.sizes.z >> 16u) + index));
-            }
+        let nbg0 = nbg0Pixel(position.x, position.y);
+        if nbg0.a > 0.0 {
+            color = nbg0.rgb;
+            layer = kLayerNbg0;
         }
     }
 
@@ -113,10 +151,31 @@ fn vdp2Fragment(@builtin(position) position: vec4f) -> @location(0) vec4f {
             let fade = clamp((distance - frame.ground.z) / (frame.ground.w - frame.ground.z), 0.0, 1.0);
             let ratio = floor(fade * 31.0) / 31.0;
             color = floor(mix(ground, rgb5(frame.sizes.w), ratio));
+            layer = kLayerRbg0;
         }
     }
 
-    return vec4f(color / 31.0, 1.0);
+    // NBG1, the water: inside window 0 it replaces the ground with a reflection of the sky.
+    // The line scroll table picks, per scanline, which (mirrored) line to show and how far
+    // to shift it sideways; the result is blended towards the water colour.
+    if (frame.water.w & 0x100u) != 0u && insideWindow(pixel) {
+        let scroll = frame.water.y + pixel.y * 4u;
+        let row = signed16(vdp2Word(scroll));
+        let shift = signed16(vdp2Word(scroll + 2u));
+        let sourceRow = u32(clamp(row, 0.0, frame.screen.y - 1.0));
+        var reflection = rgb5(vdp2Word(frame.vdp2.z + sourceRow * 2u));
+        if (layers & 2u) != 0u {
+            let nbg0 = nbg0Pixel(position.x + shift, row + 0.5);
+            if nbg0.a > 0.0 {
+                reflection = nbg0.rgb;
+            }
+        }
+        let ratio = f32(frame.water.w & 31u) / 31.0;
+        color = floor(mix(reflection, rgb5(frame.water.z), ratio));
+        layer = kLayerNbg1;
+    }
+
+    return vec4f(colorOffset(color, layer) / 31.0, 1.0);
 }
 
 // --- VDP1 ----------------------------------------------------------------------
@@ -232,6 +291,11 @@ fn vdp1Fragment(in: Vdp1Out) -> @location(0) vec4f {
     let colr = vdp1Word(base + 6u);
     let pixel = vec2u(in.position.xy);
 
+    // User clipping: only draw inside the clip region (here the VDP2 line window).
+    if (pmod & 0x400u) != 0u && !insideWindow(pixel) {
+        discard;
+    }
+
     // Mesh: VDP1's checkerboard "screen door" transparency.
     if (pmod & 0x100u) != 0u && ((pixel.x ^ pixel.y) & 1u) != 0u {
         discard;
@@ -239,9 +303,11 @@ fn vdp1Fragment(in: Vdp1Out) -> @location(0) vec4f {
 
     var uv = invBilinear(in.position.xy, in.ab.xy, in.ab.zw, in.cd.xy, in.cd.zw);
     var color: vec3f;
+    var isRgb: bool; // gouraud shading only works on direct RGB colours, not colour bank codes
 
     if (ctrl & 0xFu) == 4u {
         color = resolveColor(colr);
+        isRgb = (colr & 0x8000u) != 0u;
     } else {
         if (ctrl & 0x10u) != 0u {
             uv.x = 1.0 - uv.x;
@@ -284,10 +350,11 @@ fn vdp1Fragment(in: Vdp1Out) -> @location(0) vec4f {
             }
         }
         color = resolveColor(code);
+        isRgb = (code & 0x8000u) != 0u;
     }
 
     // Gouraud shading: per-corner RGB offsets interpolated across the quad, in 5-bit steps.
-    if (pmod & 0x4u) != 0u {
+    if (pmod & 0x4u) != 0u && isRgb {
         let table = vdp1Word(base + 28u) * 8u;
         let ga = rgb5(vdp1Word(table));
         let gb = rgb5(vdp1Word(table + 2u));
@@ -302,13 +369,13 @@ fn vdp1Fragment(in: Vdp1Out) -> @location(0) vec4f {
             return vec4f(0.0, 0.0, 0.0, 0.5);
         }
         case 2u: { // half luminance
-            return vec4f(floor(color * 0.5) / 31.0, 1.0);
+            return vec4f(colorOffset(floor(color * 0.5), kLayerSprite) / 31.0, 1.0);
         }
         case 3u: { // half transparency
-            return vec4f(color / 31.0, 0.5);
+            return vec4f(colorOffset(color, kLayerSprite) / 31.0, 0.5);
         }
         default: {
-            return vec4f(color / 31.0, 1.0);
+            return vec4f(colorOffset(color, kLayerSprite) / 31.0, 1.0);
         }
     }
 }

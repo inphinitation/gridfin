@@ -206,3 +206,40 @@ TEST_CASE("billboards fade to mesh up close and are culled before they fill the 
     CHECK((vram.read16(4) & pmod::kMesh) != 0);
     CHECK(drawAt(0.5f) == 0);
 }
+
+TEST_CASE("point lights brighten nearby corners in their own colour")
+{
+    const View view = testView();
+    Vdp1Vram vram;
+    Lighting lighting;
+    lighting.ambient = 0.5f;
+    lighting.diffuse = 0.0f;
+    lighting.hazeSteps = 0;
+
+    const auto cornerGouraud = [&](const Lighting& light) {
+        Geometry geometry;
+        geometry.begin(view, light);
+        geometry.quad(facingQuad(4.0f), {});
+        geometry.end(vram);
+        REQUIRE(vram.commandCount() == 1);
+        const std::uint32_t table = vram.read16(28) * 8u;
+        return std::array<Rgb5, 2>{unpack(vram.read16(table)), unpack(vram.read16(table + 2))};
+    };
+
+    const auto dark = cornerGouraud(lighting);
+    // An orange light in front of corner A (top-left, at x = -1, y = 1, z = -4).
+    REQUIRE(lighting.addPointLight({{-1.0f, 1.0f, -3.5f}, {1.0f, 0.5f, 0.0f}, 2.0f}));
+    const auto lit = cornerGouraud(lighting);
+
+    CHECK(lit[0].r > dark[0].r);
+    CHECK(lit[0].r > lit[0].g);
+    CHECK(lit[0].b == dark[0].b);
+    CHECK(lit[1] == dark[1]); // corner B is beyond the light's radius
+}
+
+TEST_CASE("only a few point lights are allowed")
+{
+    Lighting lighting;
+    for (std::size_t i = 0; i < Lighting::kMaxPointLights; ++i) CHECK(lighting.addPointLight({}));
+    CHECK_FALSE(lighting.addPointLight({}));
+}

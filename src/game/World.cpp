@@ -14,15 +14,14 @@ namespace {
     return std::max(1, static_cast<int>(std::ceil(length / World::kTileSize - 0.01f)));
 }
 
-/// Emits a face cut into tiles; `pick(row, rows)` chooses the texture per tile row.
+/// Emits a face cut into tiles; `pick(row)` chooses the texture per tile row.
 template <typename PickTexture>
-void drawFace(saturn::Geometry& geometry, const BoxFace& face, PickTexture pick)
+void drawFace(saturn::Geometry& geometry, const BoxFace& face, PickTexture pick, Material material = {})
 {
     const int columns = tileCount(glm::length(face.u));
     const int rows = tileCount(glm::length(face.v));
     const glm::vec3 du = face.u / static_cast<float>(columns);
     const glm::vec3 dv = face.v / static_cast<float>(rows);
-    Material material;
     for (int row = 0; row < rows; ++row) {
         material.texture = pick(row);
         for (int column = 0; column < columns; ++column) {
@@ -61,9 +60,17 @@ void World::addTree(glm::vec3 base, float height)
     m_colliders.push_back(Aabb::fromCenter(base + glm::vec3(0.0f, height * 0.5f, 0.0f), {0.25f, height * 0.5f, 0.25f}));
 }
 
+void World::addBrazier(glm::vec3 base)
+{
+    m_braziers.push_back({base});
+    addBlock(base - glm::vec3(0.25f, 0.0f, 0.25f), base + glm::vec3(0.25f, Brazier::kPillarHeight, 0.25f),
+             BlockStyle::Stone);
+}
+
 void World::buildTestLevel()
 {
     m_blocks.clear();
+    m_braziers.clear();
     m_trees.clear();
     m_colliders.clear();
 
@@ -97,6 +104,15 @@ void World::buildTestLevel()
         addBlock(center - glm::vec3(0.5f, 0, 0.5f), center + glm::vec3(0.5f, 4.0f, 0.5f), BlockStyle::Stone);
     }
 
+    // A pond in front of the brick wall, with a brazier behind it to reflect.
+    m_pond = {-8.0f, -2.5f, -1.5f, 3.5f, kGroundHeight};
+
+    // Braziers: their fires light the area around them (best seen at dusk).
+    addBrazier({3.0f, 0.0f, 2.0f});
+    addBrazier({-3.2f, 0.0f, -11.0f});
+    addBrazier({14.5f, 1.8f, -2.5f});
+    addBrazier({-7.0f, 0.0f, -3.5f});
+
     // Trees scattered outside the play area.
     for (int i = 0; i < 28; ++i) {
         const float angle = static_cast<float>(i) * 2.399963f; // golden angle
@@ -129,9 +145,15 @@ float World::raycast(glm::vec3 origin, glm::vec3 dir, float maxDistance) const n
     return std::max(best, 0.0f);
 }
 
-void World::draw(saturn::Geometry& geometry, const Assets& assets) const
+void World::draw(saturn::Geometry& geometry, const Assets& assets, const Aabb* region) const
 {
+    const auto included = [&](const Aabb& box) { return !region || region->overlaps(box); };
+    // The monolith's dark glass is glossy.
+    Material glossy;
+    glossy.specular = 0.6f;
+
     for (const Block& block : m_blocks) {
+        if (!included(block.box)) continue;
         const auto faces = boxFaces(block.box);
         for (std::size_t f = 0; f < faces.size(); ++f) {
             const bool top = f == kFaceTop;
@@ -139,7 +161,7 @@ void World::draw(saturn::Geometry& geometry, const Assets& assets) const
             if (bottom && block.box.min.y <= kGroundHeight) continue; // never visible
 
             switch (block.style) {
-            case BlockStyle::Grid: drawFace(geometry, faces[f], [&](int) { return assets.gridTile; }); break;
+            case BlockStyle::Grid: drawFace(geometry, faces[f], [&](int) { return assets.gridTile; }, glossy); break;
             case BlockStyle::Stone: drawFace(geometry, faces[f], [&](int) { return assets.stone; }); break;
             case BlockStyle::Crate: drawFace(geometry, faces[f], [&](int) { return assets.crate; }); break;
             case BlockStyle::Brick:
@@ -157,7 +179,35 @@ void World::draw(saturn::Geometry& geometry, const Assets& assets) const
 
     Material treeMaterial;
     treeMaterial.texture = assets.tree;
-    for (const Tree& tree : m_trees) geometry.billboard(tree.base, {tree.height * 0.5f, tree.height}, treeMaterial);
+    for (const Tree& tree : m_trees) {
+        if (!included(Aabb::fromCenter(tree.base, glm::vec3(0.5f)))) continue;
+        geometry.billboard(tree.base, {tree.height * 0.5f, tree.height}, treeMaterial);
+    }
+
+    // Fire is its own light source: unlit, so it stays bright at night.
+    Material fireMaterial;
+    fireMaterial.texture = assets.fire;
+    fireMaterial.lit = false;
+    fireMaterial.depthBias = -0.3f; // in front of the pillar top it stands on
+    for (const Brazier& brazier : m_braziers) {
+        if (!included(Aabb::fromCenter(brazier.base, glm::vec3(0.5f)))) continue;
+        geometry.billboard(brazier.flameBase(), {0.55f, 0.8f}, fireMaterial);
+    }
+
+    if (region) return; // the water doesn't reflect itself
+
+    // The pond surface: mesh lets the reflection layer below show through every other pixel,
+    // and the gloss puts a moving sun glint on it. It sorts behind everything that stands in or
+    // around the pond (but in front of the reflections).
+    Material water;
+    water.texture = assets.water;
+    water.mesh = true;
+    water.specular = 1.2f;
+    water.depthBias = kWaterDepthBias;
+    const Pond& pond = m_pond;
+    const BoxFace surface{
+        {pond.minX, pond.surfaceY, pond.minZ}, {pond.maxX - pond.minX, 0, 0}, {0, 0, pond.maxZ - pond.minZ}};
+    drawFace(geometry, surface, [&](int) { return assets.water; }, water);
 }
 
 } // namespace gridfin

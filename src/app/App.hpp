@@ -8,8 +8,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace gridfin {
@@ -18,8 +20,10 @@ struct AppOptions {
     int exitAfterFrames = 0;    ///< 0 = run until closed
     std::string screenshotPath; ///< saved on the last frame when exitAfterFrames is set
     bool startInFirstPerson = false;
-    bool captureDisplay = false;    ///< screenshot the filtered window output instead of the framebuffer
-    gpu::PresentSettings present{}; ///< initial display settings
+    bool startAtDusk = false;
+    std::optional<std::array<float, 3>> spawn; ///< x, z, yaw in degrees
+    bool captureDisplay = false;               ///< screenshot the filtered window output instead of the framebuffer
+    gpu::PresentSettings present{};            ///< initial display settings
 
     [[nodiscard]] static AppOptions parse(int argc, char** argv);
 };

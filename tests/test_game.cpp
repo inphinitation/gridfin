@@ -114,3 +114,47 @@ TEST_CASE("a full game frame fits in VDP1 and VDP2 memory")
     CHECK(machine.vdp1.commandCount() > 50);
     CHECK(machine.geometry.stats().overflow == 0);
 }
+
+TEST_CASE("the game fades in from black and tints the backgrounds at dusk")
+{
+    saturn::Machine machine;
+    Game game;
+    REQUIRE(game.init(machine));
+
+    game.render(machine);
+    const auto& registers = machine.vdp2Registers;
+    CHECK(registers.colorOffsetB.r == -255); // the first frame is black
+    CHECK(registers.colorOffsetEnable == saturn::layer::kAll);
+
+    for (int i = 0; i < 60; ++i) game.update(Game::kFixedStep, {});
+    game.render(machine);
+    CHECK(registers.colorOffsetA == saturn::ColorOffset{});
+    CHECK(registers.colorOffsetB == saturn::ColorOffset{});
+
+    InputState toggle;
+    toggle.toggleDuskPressed = true;
+    game.update(Game::kFixedStep, toggle);
+    for (int i = 0; i < 180; ++i) game.update(Game::kFixedStep, {});
+    CHECK(game.duskAmount() == doctest::Approx(1.0f));
+    game.render(machine);
+    CHECK(registers.colorOffsetA.b < 0);
+    CHECK(registers.colorOffsetB == saturn::ColorOffset{}); // sprites are lit by their own lights instead
+}
+
+TEST_CASE("the pond is visible from beside it and turns on the water layer")
+{
+    saturn::Machine machine;
+    Game game;
+    REQUIRE(game.init(machine));
+    game.spawn(-4.5f, 5.0f, 0.0f);
+    game.render(machine);
+    CHECK(machine.vdp2Registers.waterEnabled);
+    int insideLines = 0;
+    for (const auto& span : machine.vdp2Registers.window) insideLines += span.end > span.start ? 1 : 0;
+    CHECK(insideLines > 20);
+
+    // Facing away from it, the window is empty and the layer off.
+    game.spawn(-4.5f, 8.0f, kPi);
+    game.render(machine);
+    CHECK_FALSE(machine.vdp2Registers.waterEnabled);
+}

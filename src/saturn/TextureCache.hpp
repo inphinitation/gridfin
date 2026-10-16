@@ -68,6 +68,11 @@ public:
     [[nodiscard]] ColorWord fallbackColor(TextureId id) const { return m_textures.at(id).fallback; }
     [[nodiscard]] bool isResident(TextureId id) const { return m_textures.at(id).resident; }
 
+    /// Replaces the lookup table of a Lut16 texture: palette cycling for fire, water and
+    /// flashing effects. A resident texture's table is rewritten in VRAM straight away
+    /// (32 bytes of DMA, counted against this frame); otherwise it goes up with the texture.
+    bool setLut(TextureId id, const Lut& lut);
+
     /// Drops every texture from VRAM (for example when changing areas).
     void evictAll();
 

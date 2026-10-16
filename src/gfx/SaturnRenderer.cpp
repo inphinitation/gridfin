@@ -31,8 +31,11 @@ struct FrameUniforms {
     std::array<float, 4> sky;
     std::array<std::uint32_t, 4> vdp2;
     std::array<std::uint32_t, 4> sizes;
+    std::array<std::int32_t, 4> offsetA; ///< colour offset A (r, g, b), enable bits
+    std::array<std::int32_t, 4> offsetB; ///< colour offset B (r, g, b), select bits
+    std::array<std::uint32_t, 4> water;  ///< window table, reflection table, water colour, ratio | enabled << 8
 };
-static_assert(sizeof(FrameUniforms) == 160);
+static_assert(sizeof(FrameUniforms) == 208);
 
 /// Mirrors `Present` in shaders/present.wgsl.
 struct PresentUniforms {
@@ -363,19 +366,28 @@ void SaturnRenderer::uploadMemory(Machine& machine)
         wgpuQueueWriteBuffer(m_queue, m_vdp1Vram.get(), begin, vdp1Bytes.data() + begin, end - begin);
     }
 
-    // VDP2: bitmaps change at load time, the line colour table every frame.
+    // VDP2: bitmaps change at load time; the per-line tables (line colours, the line window
+    // and the reflection line scroll) every frame.
     Vdp2Vram& vdp2 = machine.vdp2;
     const Vdp2Registers& registers = machine.vdp2Registers;
-    for (std::uint32_t line = 0; line < registers.lineColors.size(); ++line) {
+    const auto u16 = [](std::int16_t value) { return static_cast<std::uint16_t>(value); };
+    for (std::uint32_t line = 0; line < kScreenHeight; ++line) {
         vdp2.write16(registers.lineColorAddress + line * 2, registers.lineColors[line]);
+        vdp2.write16(registers.windowTableAddress + line * 4, u16(registers.window[line].start));
+        vdp2.write16(registers.windowTableAddress + line * 4 + 2, u16(registers.window[line].end));
+        vdp2.write16(registers.reflectionTableAddress + line * 4, u16(registers.reflection[line].row));
+        vdp2.write16(registers.reflectionTableAddress + line * 4 + 2, u16(registers.reflection[line].offsetX));
     }
     const auto vdp2Bytes = vdp2.bytes();
     if (vdp2.vramDirty) {
         wgpuQueueWriteBuffer(m_queue, m_vdp2Vram.get(), 0, vdp2Bytes.data(), vdp2Bytes.size());
         vdp2.vramDirty = false;
     } else {
-        wgpuQueueWriteBuffer(m_queue, m_vdp2Vram.get(), registers.lineColorAddress,
-                             vdp2Bytes.data() + registers.lineColorAddress, kScreenHeight * 2);
+        for (const auto& [address, size] : {std::pair{registers.lineColorAddress, kScreenHeight * 2u},
+                                            std::pair{registers.windowTableAddress, kScreenHeight * 4u},
+                                            std::pair{registers.reflectionTableAddress, kScreenHeight * 4u}}) {
+            wgpuQueueWriteBuffer(m_queue, m_vdp2Vram.get(), address, vdp2Bytes.data() + address, size);
+        }
     }
     if (vdp2.cramDirty) {
         const auto cram = vdp2.cramWords();
@@ -407,6 +419,13 @@ void SaturnRenderer::writeFrameUniforms(const Machine& machine)
     frame.sizes = {size(registers.ground.width, registers.ground.height),
                    size(registers.clouds.width, registers.clouds.height),
                    size(registers.ground.bank, registers.clouds.bank), registers.hazeColor};
+    frame.offsetA = {registers.colorOffsetA.r, registers.colorOffsetA.g, registers.colorOffsetA.b,
+                     registers.colorOffsetEnable};
+    frame.offsetB = {registers.colorOffsetB.r, registers.colorOffsetB.g, registers.colorOffsetB.b,
+                     registers.colorOffsetSelect};
+    frame.water = {registers.windowTableAddress, registers.reflectionTableAddress, registers.waterColor,
+                   static_cast<std::uint32_t>(std::clamp(registers.waterRatio, 0, 31))
+                       | (registers.waterEnabled ? 0x100u : 0u)};
     wgpuQueueWriteBuffer(m_queue, m_frameUniforms.get(), 0, &frame, sizeof(frame));
 }
 

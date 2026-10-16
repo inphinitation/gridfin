@@ -59,10 +59,32 @@ struct View {
     [[nodiscard]] float horizonRow() const noexcept;
 };
 
+/// A dynamic light (torch, muzzle flash, lamp). It has no hardware support: the CPU
+/// adds it into each polygon's gouraud table, per corner and per colour channel.
+struct PointLight {
+    glm::vec3 position{0.0f};
+    glm::vec3 color{1.0f}; ///< 1 = full brightness; gouraud can brighten by at most +15/31
+    float radius = 6.0f;   ///< no effect beyond this distance
+};
+
 struct Lighting {
+    /// Lights cost CPU time per vertex, so like SGL-era engines only a handful are allowed.
+    static constexpr std::size_t kMaxPointLights = 4;
+
     glm::vec3 sunDirection = glm::normalize(glm::vec3(0.4f, 0.8f, 0.3f)); ///< towards the sun
     float ambient = 0.6f;
     float diffuse = 0.55f;
+    std::array<PointLight, kMaxPointLights> pointLights{};
+    std::size_t pointLightCount = 0;
+
+    /// Adds a light; returns false once kMaxPointLights are in use.
+    bool addPointLight(const PointLight& light) noexcept
+    {
+        if (pointLightCount >= kMaxPointLights) return false;
+        pointLights[pointLightCount++] = light;
+        return true;
+    }
+
     /// Distance haze added through the gouraud table, in 5-bit colour steps.
     float hazeStart = 24.0f;
     float hazeEnd = 60.0f;
@@ -83,6 +105,18 @@ struct Material {
     SortMode sort = SortMode::Center;
     /// Added to the sort depth; negative values draw later (in front).
     float depthBias = 0.0f;
+    /// Gloss: a highlight from the sun and point lights, computed per corner into the gouraud table.
+    float specular = 0.0f;
+};
+
+/// Screen rectangle relative to the screen centre, inclusive.
+struct ScreenRect {
+    int minX = 0;
+    int minY = 0;
+    int maxX = -1;
+    int maxY = -1;
+
+    [[nodiscard]] bool empty() const noexcept { return maxX < minX || maxY < minY; }
 };
 
 struct GeometryStats {
@@ -110,6 +144,8 @@ public:
     /// they are not drawn: Saturn games faded out sprites before they could fill the screen.
     static constexpr float kBillboardMeshDistance = 1.5f;
     static constexpr float kBillboardCullDistance = 0.8f;
+    /// Reflections sort behind everything, so the water surface and the real scene cover them.
+    static constexpr float kReflectionDepthBias = 1000.0f;
 
     /// Starts a frame. Textures are resolved through `textures` (which also begins its frame);
     /// without a cache every textured polygon is drawn flat.
@@ -122,6 +158,13 @@ public:
 
     /// Camera facing scaled sprite whose bottom centre sits at `base`.
     void billboard(glm::vec3 base, glm::vec2 size, const Material& material);
+
+    /// Everything submitted until endReflection() is mirrored across the horizontal plane at
+    /// `planeY`: drawn upside down, at half luminance, clipped to the VDP2 window (the water's
+    /// footprint) and sorted behind everything else so the water surface covers it. Polygons
+    /// whose screen bounds miss `clip` are dropped before they cost VDP1 time.
+    void beginReflection(float planeY, ScreenRect clip);
+    void endReflection();
 
     /// Sorts everything submitted since begin() back-to-front and writes the VDP1 command table.
     void end(Vdp1Vram& vram);
@@ -137,7 +180,15 @@ private:
         std::int32_t next;
     };
 
-    [[nodiscard]] GouraudTable shade(const std::array<glm::vec3, 4>& viewCorners, glm::vec3 normal, bool lit) const;
+    [[nodiscard]] GouraudTable shade(const std::array<glm::vec3, 4>& worldCorners,
+                                     const std::array<glm::vec3, 4>& viewCorners, glm::vec3 normal, bool lit,
+                                     float specular, bool sprite = false) const;
+    [[nodiscard]] glm::vec3 mirror(glm::vec3 point) const noexcept
+    {
+        return {point.x, 2.0f * m_reflectionPlane - point.y, point.z};
+    }
+    [[nodiscard]] bool outsideReflectionClip(float minX, float minY, float maxX, float maxY) const noexcept;
+    void applyReflection(Command& command) const noexcept;
     void insert(const Command& command, const GouraudTable* gouraud, float sortDepth);
     [[nodiscard]] static Command baseCommand(CommandType type, const Material& material, const Texture* texture);
     [[nodiscard]] std::optional<Texture> resolve(const Material& material);
@@ -145,6 +196,9 @@ private:
     View m_view;
     Lighting m_lighting;
     TextureCache* m_textures = nullptr;
+    bool m_reflecting = false;
+    float m_reflectionPlane = 0.0f;
+    ScreenRect m_reflectionClip;
     GeometryStats m_stats;
     std::vector<Entry> m_entries;
     std::array<std::int32_t, kOrderingTableSize> m_heads{};
