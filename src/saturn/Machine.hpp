@@ -20,8 +20,10 @@ struct Machine {
 
     Machine()
     {
-        // Reserve the line colour table at a fixed VDP2 address.
+        // Reserve the per-line tables at fixed VDP2 addresses.
         vdp2Registers.lineColorAddress = vdp2.allocate(kScreenHeight * 2).value_or(0);
+        vdp2Registers.windowTableAddress = vdp2.allocate(kScreenHeight * 4).value_or(0);
+        vdp2Registers.reflectionTableAddress = vdp2.allocate(kScreenHeight * 4).value_or(0);
     }
 };
 

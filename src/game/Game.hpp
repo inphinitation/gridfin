@@ -26,6 +26,9 @@ public:
     [[nodiscard]] const CameraRig& cameraRig() const noexcept { return m_cameraRig; }
     /// 0 = day, 1 = dusk; eases between the two after a toggle.
     [[nodiscard]] float duskAmount() const noexcept { return m_duskAmount; }
+    /// Moves the player (and camera) to (x, z) facing `yaw` radians; for testing and screenshots.
+    void spawn(float x, float z, float yaw);
+
     /// Switches between day and dusk straight away (no transition).
     void setDusk(bool dusk) noexcept
     {
@@ -39,6 +42,7 @@ private:
     void computeSky(const saturn::View& view, saturn::Vdp2Registers& registers) const;
     [[nodiscard]] saturn::Lighting frameLighting() const;
     void setColorOffset(saturn::Vdp2Registers& registers) const;
+    void computeWater(const saturn::View& view, saturn::Vdp2Registers& registers) const;
 
     Assets m_assets;
     World m_world;

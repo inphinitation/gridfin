@@ -18,6 +18,9 @@ The renderer is not a shader filter over a modern pipeline. It models the Saturn
 - **Lighting the Saturn way:** gouraud tables carry the sun, up to four flickering coloured point lights and distance
   haze; the VDP2 colour offset fades the screen in and tints the backgrounds at dusk; fire is animated by palette
   cycling.
+- **Reflections the Saturn way:** a pond whose outline becomes a VDP2 line window. Inside it, a line-scrolled
+  layer mirrors the sky with ripples, and the objects around the pond are drawn mirrored and clipped under a mesh
+  water surface. Glossy materials get specular highlights through the gouraud tables.
 - **Hardware budgets are enforced.** VDP1's drawing time is estimated each frame, and overloaded frames drop to
   30 fps. Textures live in a 1 MB work RAM budget and stream into VRAM with a per-frame DMA limit. The window title
   shows both.
@@ -102,7 +105,7 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
   Edit a shader and press **F5**. On a compile error the old shaders stay and the error is logged.
 - **Tests:** `ctest --preset debug`. The engine library (`src/saturn`, `src/game`) has no SDL or GPU dependency, so
   everything up to the VDP1 command table can be unit tested.
-- **Headless runs:** `gridfin --frames 60 --screenshot out.bmp [--first-person] [--dusk]` renders 60 frames with a fixed time
+- **Headless runs:** `gridfin --frames 60 --screenshot out.bmp [--first-person] [--dusk] [--spawn x z yaw]` renders 60 frames with a fixed time
   step, saves the VDP framebuffer and exits. Add `--filter sharp|scanlines|scanlines-strong|crt`, `--ntsc` and
   `--capture-display` to start with display filters and save the filtered window output instead. CI uses this as a
   smoke test on a software Vulkan driver.

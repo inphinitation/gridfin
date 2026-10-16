@@ -45,6 +45,10 @@ AppOptions AppOptions::parse(int argc, char** argv)
             options.screenshotPath = argv[++i];
         } else if (arg == "--first-person") {
             options.startInFirstPerson = true;
+        } else if (arg == "--spawn" && i + 3 < argc) {
+            options.spawn = std::array<float, 3>{std::strtof(argv[i + 1], nullptr), std::strtof(argv[i + 2], nullptr),
+                                                 std::strtof(argv[i + 3], nullptr)};
+            i += 3;
         } else if (arg == "--dusk") {
             options.startAtDusk = true;
         } else if (arg == "--capture-display") {
@@ -105,6 +109,7 @@ SDL_AppResult App::init()
     if (!m_game.init(*m_machine)) return SDL_APP_FAILURE;
     m_present = m_options.present;
     m_game.setDusk(m_options.startAtDusk);
+    if (m_options.spawn) m_game.spawn((*m_options.spawn)[0], (*m_options.spawn)[1], radians((*m_options.spawn)[2]));
     if (m_options.startInFirstPerson) {
         InputState toggle;
         toggle.toggleViewPressed = true;

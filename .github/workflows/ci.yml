@@ -64,6 +64,11 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x960x24" \
             ./build/native-ci/bin/Release/gridfin --frames 60 --dusk --screenshot gridfin-linux-dusk.bmp
           test -s gridfin-linux-dusk.bmp
+          # The pond: line window, reflection layer and mirrored geometry.
+          xvfb-run -a -s "-screen 0 1280x960x24" \
+            ./build/native-ci/bin/Release/gridfin --frames 60 --first-person --spawn -4.5 5 0 \
+            --screenshot gridfin-linux-pond.bmp
+          test -s gridfin-linux-pond.bmp
 
       - name: Upload screenshot
         if: runner.os == 'Linux'

@@ -86,9 +86,32 @@ There is no lighting hardware; everything goes through the gouraud tables, as in
 Unlit materials (the fires) keep their texture colours. Sprites are lit as a whole from their middle. VDP2 layers
 can't be lit: the dusk look on the backgrounds comes from the colour offset below.
 
+**Specular highlights:** materials can be glossy (`Material::specular`). A tight Blinn-Phong term from the sun and
+the point lights is added per corner, so the glint slides across a surface as the camera moves. The robot, the
+monolith and the pond use it. It costs CPU time per vertex and nothing on VDP1.
+
 **Palette cycling:** `TextureCache::setLut` rewrites a texture's 16-colour lookup table in VRAM. The fire sprite
 rotates its colours 15 times a second, which makes bands of light climb the flame. Each rewrite is 32 bytes of DMA,
 counted against the frame's budget.
+
+## Reflections: the pond
+
+The pond combines three techniques Saturn games mixed for water:
+
+1. **A VDP2 line window.** Each frame the CPU clips the pond's outline at the near plane, projects it and rasterises
+   it into a start/end span per scanline (`saturn::computeLineWindow`). The table lives in VDP2 VRAM.
+2. **The NBG1 water layer.** Inside the window it replaces the ground with a reflection of the sky. A per-line
+   scroll table chooses, for every scanline, the line mirrored about the horizon, and shifts it sideways a little
+   (more for nearer water) to make ripples. The result is blended towards the water colour by a colour calculation
+   ratio. The sky, clouds and mountains reflect for free.
+3. **Mirrored geometry.** Objects near the pond (blocks, braziers, the player) are submitted a second time between
+   `Geometry::beginReflection()` and `endReflection()`. They are mirrored across the water plane, keep their real
+   lighting, are drawn at half luminance, sort behind everything else, and are clipped to the window. Polygons whose
+   screen bounds miss the window are dropped before they cost anything; the rest show up in the VDP1 load.
+
+A **mesh** water surface (palette-cycled ripple texture, specular sun glint) is drawn on top, so every other pixel
+shows the reflection. It looks dithered on a sharp display and turns into translucent water with the NTSC or CRT
+filters, as on a TV.
 
 ## VDP2 (backgrounds): `src/saturn/Vdp2.*`, `shaders/vdp.wgsl`
 
@@ -137,6 +160,9 @@ very weak GPUs; the sharp mode is the cheapest.
   and the VDP1 framebuffer double buffering/erase timing are not modelled.
 - VDP2 features beyond the three layers above (cell/character patterns, more scroll planes, windows, sprite
   priorities, line scroll, mosaic) are not modelled yet.
+- VDP1 user clipping here clips to the VDP2 line window instead of VDP1's rectangular user clip area. On the hardware
+  the same result needs the reflection drawn at a lower sprite priority than the ground, with the window turning the
+  ground off inside the pond; this renderer composites VDP1 straight over VDP2 and has no per-pixel priority.
 - Colour offset is applied per pixel to the sprite layer before half-transparency blending; the hardware applies it
   to the final composited sprite layer. The difference only shows on half-transparent polygons.
 - No frame-rate cap: the game runs at the display's refresh rate with a fixed 60 Hz simulation. Many Saturn 3D games

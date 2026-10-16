@@ -74,6 +74,7 @@ void Geometry::begin(const View& view, const Lighting& lighting, TextureCache* t
     m_view = view;
     m_lighting = lighting;
     m_textures = textures;
+    m_reflecting = false;
     if (m_textures) m_textures->beginFrame();
     m_stats = {};
     m_entries.clear();
@@ -109,7 +110,7 @@ Command Geometry::baseCommand(CommandType type, const Material& material, const 
 }
 
 GouraudTable Geometry::shade(const std::array<glm::vec3, 4>& worldCorners, const std::array<glm::vec3, 4>& viewCorners,
-                             glm::vec3 normal, bool lit, bool sprite) const
+                             glm::vec3 normal, bool lit, float specular, bool sprite) const
 {
     // Unlit materials (fire, effects) keep their texture colours; lit ones get the sun.
     glm::vec3 base{1.0f};
@@ -117,11 +118,22 @@ GouraudTable Geometry::shade(const std::array<glm::vec3, 4>& worldCorners, const
         base = glm::vec3(m_lighting.ambient
                          + m_lighting.diffuse * std::max(0.0f, glm::dot(normal, m_lighting.sunDirection)));
     }
+    // Blinn-Phong highlight: tight, so it reads as a glint moving across the surface.
+    const auto highlight = [&](glm::vec3 toLight, glm::vec3 toEye) {
+        const glm::vec3 halfway = glm::normalize(toLight + toEye);
+        return std::pow(std::max(0.0f, glm::dot(normal, halfway)), 24.0f) * specular;
+    };
 
     GouraudTable table{};
     const float hazeRange = std::max(m_lighting.hazeEnd - m_lighting.hazeStart, 1e-3f);
     for (std::size_t i = 0; i < 4; ++i) {
         glm::vec3 light = base;
+        const glm::vec3 toEye = glm::normalize(m_view.position - worldCorners[i]);
+        const bool glossy = lit && !sprite && specular > 0.0f;
+        if (glossy) {
+            // The sun's glint fades with the sun itself (dusk lowers the diffuse term).
+            light += glm::vec3(highlight(m_lighting.sunDirection, toEye) * m_lighting.diffuse / 0.55f);
+        }
         for (std::size_t l = 0; l < m_lighting.pointLightCount; ++l) {
             const PointLight& point = m_lighting.pointLights[l];
             const glm::vec3 toLight = point.position - worldCorners[i];
@@ -129,9 +141,10 @@ GouraudTable Geometry::shade(const std::array<glm::vec3, 4>& worldCorners, const
             if (distance >= point.radius) continue;
             const float falloff = 1.0f - distance / point.radius;
             // Surfaces facing away get nothing; sprites have no real normal and are lit from all sides.
-            const float facing =
-                sprite || distance < 1e-4f ? 1.0f : std::max(0.0f, glm::dot(normal, toLight / distance));
+            const glm::vec3 direction = distance > 1e-4f ? toLight / distance : glm::vec3(0.0f, 1.0f, 0.0f);
+            const float facing = sprite ? 1.0f : std::max(0.0f, glm::dot(normal, direction));
             light += point.color * (falloff * falloff * facing);
+            if (glossy) light += point.color * (falloff * highlight(direction, toEye));
         }
 
         const float t = std::clamp((viewCorners[i].z - m_lighting.hazeStart) / hazeRange, 0.0f, 1.0f);
@@ -163,11 +176,19 @@ void Geometry::insert(const Command& command, const GouraudTable* gouraud, float
 void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& material)
 {
     ++m_stats.submitted;
+    if (m_reflecting && material.colorCalc == ColorCalc::Shadow) return; // shadows don't reflect
+
+    // A reflection is the same quad mirrored across the water plane. Lighting still uses the
+    // real corners, so the reflection shows the object as lit, not its underside.
+    std::array<glm::vec3, 4> placed = corners;
+    if (m_reflecting) {
+        for (glm::vec3& corner : placed) corner = mirror(corner);
+    }
 
     std::array<glm::vec3, 4> viewCorners;
     float minZ = 1e30f, maxZ = -1e30f, sumZ = 0.0f;
     for (std::size_t i = 0; i < 4; ++i) {
-        viewCorners[i] = m_view.toView(corners[i]);
+        viewCorners[i] = m_view.toView(placed[i]);
         minZ = std::min(minZ, viewCorners[i].z);
         maxZ = std::max(maxZ, viewCorners[i].z);
         sumZ += viewCorners[i].z;
@@ -192,7 +213,8 @@ void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& mat
             const glm::vec2 b = screen[(i + 1) % 4];
             area += a.x * b.y - b.x * a.y;
         }
-        if (area <= 0.0f) {
+        // Mirroring reverses the winding: a reflected front face appears anticlockwise.
+        if (m_reflecting ? area >= 0.0f : area <= 0.0f) {
             ++m_stats.culledBackface;
             return;
         }
@@ -201,6 +223,19 @@ void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& mat
     if (offscreen(screen)) {
         ++m_stats.culledOffscreen;
         return;
+    }
+    if (m_reflecting) {
+        float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+        for (const glm::vec2& point : screen) {
+            minX = std::min(minX, point.x);
+            minY = std::min(minY, point.y);
+            maxX = std::max(maxX, point.x);
+            maxY = std::max(maxY, point.y);
+        }
+        if (outsideReflectionClip(minX, minY, maxX, maxY)) {
+            ++m_stats.culledOffscreen;
+            return;
+        }
     }
 
     for (const glm::vec2& point : screen) {
@@ -222,17 +257,18 @@ void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& mat
         command.xy[i * 2] = snap(screen[i].x);
         command.xy[i * 2 + 1] = snap(screen[i].y);
     }
+    if (m_reflecting) applyReflection(command);
 
     // Normal from the diagonals stays valid for quads with collapsed corners (triangles).
     const glm::vec3 cross = glm::cross(corners[3] - corners[1], corners[2] - corners[0]);
     const float length = glm::length(cross);
     const glm::vec3 normal = length > 1e-6f ? cross / length : glm::vec3(0.0f, 1.0f, 0.0f);
-    const GouraudTable gouraud = shade(corners, viewCorners, normal, material.lit);
+    const GouraudTable gouraud = shade(corners, viewCorners, normal, material.lit, material.specular);
 
     float sortDepth = sumZ * 0.25f;
     if (material.sort == SortMode::Farthest) sortDepth = maxZ;
     if (material.sort == SortMode::Nearest) sortDepth = minZ;
-    insert(command, &gouraud, sortDepth + material.depthBias);
+    insert(command, &gouraud, sortDepth + material.depthBias + (m_reflecting ? kReflectionDepthBias : 0.0f));
 }
 
 void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& material)
@@ -240,7 +276,9 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
     ++m_stats.submitted;
     if (material.texture == kNoTexture) return;
 
-    const glm::vec3 viewBase = m_view.toView(base);
+    // A reflected sprite hangs down from the mirrored base, upside down.
+    const glm::vec3 placedBase = m_reflecting ? mirror(base) : base;
+    const glm::vec3 viewBase = m_view.toView(placedBase);
     if (viewBase.z < std::max(m_view.nearZ, kBillboardCullDistance)) {
         ++m_stats.culledNear;
         return;
@@ -253,12 +291,14 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
     const glm::vec2 anchor = m_view.project(viewBase);
     const float width = size.x * m_view.focalX / viewBase.z;
     const float height = size.y * m_view.focalY / viewBase.z;
-    const glm::vec2 topLeft{anchor.x - width * 0.5f, anchor.y - height};
-    const glm::vec2 bottomRight{anchor.x + width * 0.5f, anchor.y};
+    const float top = m_reflecting ? anchor.y : anchor.y - height;
+    const glm::vec2 topLeft{anchor.x - width * 0.5f, top};
+    const glm::vec2 bottomRight{anchor.x + width * 0.5f, top + height};
 
     const std::array<glm::vec2, 4> rect{topLeft, glm::vec2{bottomRight.x, topLeft.y}, bottomRight,
                                         glm::vec2{topLeft.x, bottomRight.y}};
-    if (offscreen(rect)) {
+    if (offscreen(rect)
+        || (m_reflecting && outsideReflectionClip(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y))) {
         ++m_stats.culledOffscreen;
         return;
     }
@@ -277,13 +317,47 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
     // Scaled sprites name their opposite corner inclusively.
     command.xy[4] = static_cast<std::int16_t>(snap(bottomRight.x) - 1);
     command.xy[5] = static_cast<std::int16_t>(snap(bottomRight.y) - 1);
+    if (m_reflecting) {
+        command.ctrl ^= kFlipV;
+        applyReflection(command);
+    }
 
     // A sprite is shaded as a whole, from its middle.
     const glm::vec3 centre = base + glm::vec3(0.0f, size.y * 0.5f, 0.0f);
     const std::array<glm::vec3, 4> world{centre, centre, centre, centre};
     const std::array<glm::vec3, 4> depth{viewBase, viewBase, viewBase, viewBase};
-    const GouraudTable gouraud = shade(world, depth, glm::vec3(0.0f, 1.0f, 0.0f), material.lit, true);
-    insert(command, &gouraud, viewBase.z + material.depthBias);
+    const GouraudTable gouraud = shade(world, depth, glm::vec3(0.0f, 1.0f, 0.0f), material.lit, 0.0f, true);
+    insert(command, &gouraud, viewBase.z + material.depthBias + (m_reflecting ? kReflectionDepthBias : 0.0f));
+}
+
+void Geometry::beginReflection(float planeY, ScreenRect clip)
+{
+    m_reflecting = true;
+    m_reflectionPlane = planeY;
+    m_reflectionClip = clip;
+}
+
+void Geometry::endReflection()
+{
+    m_reflecting = false;
+}
+
+bool Geometry::outsideReflectionClip(float minX, float minY, float maxX, float maxY) const noexcept
+{
+    const ScreenRect& clip = m_reflectionClip;
+    return clip.empty() || maxX < static_cast<float>(clip.minX) || minX > static_cast<float>(clip.maxX + 1)
+           || maxY < static_cast<float>(clip.minY) || minY > static_cast<float>(clip.maxY + 1);
+}
+
+void Geometry::applyReflection(Command& command) const noexcept
+{
+    // Water reflects darker: half luminance, which costs VDP1 nothing extra. Clip to the
+    // window so the reflection only shows inside the water's footprint.
+    const auto calc = static_cast<ColorCalc>(command.pmod & 3u);
+    if (calc == ColorCalc::Replace) {
+        command.pmod = static_cast<std::uint16_t>((command.pmod & ~3u) | pmod::colorCalc(ColorCalc::HalfLuminance));
+    }
+    command.pmod |= pmod::kUserClip;
 }
 
 void Geometry::end(Vdp1Vram& vram)

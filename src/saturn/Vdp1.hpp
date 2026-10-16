@@ -54,6 +54,9 @@ enum class ColorCalc : std::uint16_t {
 };
 
 namespace pmod {
+/// User clipping: draw only inside the clip region. Gridfin's clip region is the VDP2 line window
+/// (see Vdp2Registers::window) rather than VDP1's user clip rectangle; see docs/SATURN.md.
+inline constexpr std::uint16_t kUserClip = 1u << 10;
 inline constexpr std::uint16_t kMesh = 1u << 8; ///< checkerboard "screen door" transparency
 inline constexpr std::uint16_t kEndCodeDisable = 1u << 7;
 inline constexpr std::uint16_t kTransparentPixelDisable = 1u << 6; ///< SPD: colour 0 is drawn

@@ -1,6 +1,7 @@
 #include "game/Game.hpp"
 
 #include "core/Log.hpp"
+#include "saturn/Window.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +31,14 @@ bool Game::init(Machine& machine)
     m_cameraRig.reset(0.0f, radians(-12.0f));
     m_cameraRig.update(0.0f, kSpawn, m_world);
     return true;
+}
+
+void Game::spawn(float x, float z, float yaw)
+{
+    const glm::vec3 feet{x, m_world.floorHeight(x, z, 100.0f), z};
+    m_player.spawn(feet, yaw);
+    m_cameraRig.reset(yaw, radians(-12.0f));
+    m_cameraRig.update(0.0f, feet, m_world);
 }
 
 void Game::update(float dt, const InputState& input)
@@ -126,21 +135,60 @@ void Game::setColorOffset(Vdp2Registers& registers) const
     registers.colorOffsetSelect = layer::kSprite;
 }
 
+void Game::computeWater(const View& view, Vdp2Registers& registers) const
+{
+    // Ripples: each scanline of the reflection shows the mirrored line, shifted sideways a
+    // little. Lines further below the horizon (closer water) ripple more.
+    const float horizon = view.horizonRow();
+    for (int line = 0; line < kScreenHeight; ++line) {
+        const float y = static_cast<float>(line);
+        const float depth = std::clamp((y - horizon) / 40.0f, 0.0f, 1.0f);
+        const float wave = std::sin(y * 0.9f + m_time * 4.0f);
+        LineScroll& scroll = registers.reflection[static_cast<std::size_t>(line)];
+        scroll.row = static_cast<std::int16_t>(std::lround(2.0f * horizon - y - 1.0f + wave * depth));
+        scroll.offsetX = static_cast<std::int16_t>(std::lround(wave * (0.5f + 2.5f * depth)));
+    }
+    registers.waterColor = rgb(40, 96, 112);
+    registers.waterRatio = 9;
+}
+
 void Game::render(Machine& machine) const
 {
     machine.view = View::fromCamera(m_cameraRig.camera());
+    Vdp2Registers& registers = machine.vdp2Registers;
+    const glm::vec3 feet = m_player.interpolatedPosition(m_accumulator / kFixedStep);
 
     Geometry& geometry = machine.geometry;
     geometry.begin(machine.view, frameLighting(), &machine.textures);
-    // Palette cycling: the fire's lookup table is rewritten in VRAM (32 bytes of DMA).
+    // Palette cycling: the fire's and the water's lookup tables are rewritten in VRAM (32 bytes of DMA each).
     machine.textures.setLut(m_assets.fire, Assets::fireLut(m_time));
+    machine.textures.setLut(m_assets.water, Assets::waterLut(m_time));
+
+    // The pond: the CPU works out its on-screen footprint as a VDP2 line window. Inside it the
+    // ground is replaced by the reflection layer, and the objects around the pond are drawn
+    // mirrored (clipped to the window) before the mesh water surface goes on top.
+    const Pond& pond = m_world.pond();
+    const auto outline = pond.outline();
+    const ScreenRect window = computeLineWindow(machine.view, outline, registers.window);
+    registers.waterEnabled = !window.empty();
+    if (registers.waterEnabled) {
+        computeWater(machine.view, registers);
+        const Aabb reflected = pond.reflectedArea(6.0f);
+        geometry.beginReflection(pond.surfaceY, window);
+        m_world.draw(geometry, m_assets, &reflected);
+        // You see yourself in the water even in first person.
+        if (reflected.overlaps(Aabb::fromCenter(feet, glm::vec3(0.5f)))) {
+            m_player.draw(geometry, m_assets, m_world, feet, true);
+        }
+        geometry.endReflection();
+    }
+
     m_world.draw(geometry, m_assets);
-    m_player.draw(geometry, m_assets, m_world, m_player.interpolatedPosition(m_accumulator / kFixedStep),
-                  !m_cameraRig.firstPerson());
+    m_player.draw(geometry, m_assets, m_world, feet, !m_cameraRig.firstPerson());
     geometry.end(machine.vdp1);
 
-    computeSky(machine.view, machine.vdp2Registers);
-    setColorOffset(machine.vdp2Registers);
+    computeSky(machine.view, registers);
+    setColorOffset(registers);
 }
 
 } // namespace gridfin

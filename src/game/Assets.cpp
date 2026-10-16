@@ -353,6 +353,25 @@ Image fireImage()
     return image;
 }
 
+// Water: indices 1-12 follow interfering ripple waves; cycling the palette makes the
+// bright crests travel across the surface.
+constexpr int kWaterBands = 12;
+
+Image waterImage()
+{
+    Image image(32, 32);
+    image.fill([](int x, int y) -> std::uint8_t {
+        // Tileable waves: whole periods across the 32 texel tile.
+        const float fx = static_cast<float>(x) / 32.0f * kTau;
+        const float fy = static_cast<float>(y) / 32.0f * kTau;
+        const float wave = std::sin(fx * 2.0f + std::sin(fy) * 1.5f) + std::sin(fy * 3.0f + fx) * 0.6f;
+        const float phase = (wave + 1.6f) / 3.2f + 0.15f * fbm(x, y, 32, 4, 2, 97);
+        const int band = static_cast<int>(phase * kWaterBands * 2.0f);
+        return static_cast<std::uint8_t>(1 + ((band % kWaterBands) + kWaterBands) % kWaterBands);
+    });
+    return image;
+}
+
 // --- VDP2 bitmaps -------------------------------------------------------------
 
 Image groundImage()
@@ -421,6 +440,19 @@ Lut Assets::fireLut(float time)
     return lut;
 }
 
+Lut Assets::waterLut(float time)
+{
+    const int phase = static_cast<int>(time * 8.0f);
+    Lut lut{};
+    for (int i = 0; i < kWaterBands; ++i) {
+        // Mostly deep blue-green with one bright crest band travelling through.
+        const int distance = (i + phase) % kWaterBands;
+        const unsigned crest = distance == 0 ? 3u : distance == 1 || distance == kWaterBands - 1 ? 2u : 0u;
+        lut[static_cast<std::size_t>(1 + i)] = rgb555(6 + crest * 3, 14 + crest * 3, 17 + crest * 3);
+    }
+    return lut;
+}
+
 bool Assets::load(TextureCache& textures, Vdp2Vram& vdp2)
 {
     Loader loader(textures, vdp2);
@@ -450,6 +482,7 @@ bool Assets::load(TextureCache& textures, Vdp2Vram& vdp2)
     fin = loader.texture("fin", std::array<std::uint32_t, 3>{0xC05010, 0xFF9A40, 0x803008}, finImage());
     shadow = loader.texture("shadow", std::array<std::uint32_t, 1>{0x000000}, shadowImage());
     fire = loader.texture("fire", fireLut(0.0f), fireImage());
+    water = loader.texture("water", waterLut(0.0f), waterImage());
     tree = loader.texture(
         "tree",
         std::array<std::uint32_t, 8>{0x1E4A1C, 0x2A6426, 0x3A7E2E, 0x52983A, 0x74B44C, 0x5A3A1E, 0x6E4826, 0x2A3A20},

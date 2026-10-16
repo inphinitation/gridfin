@@ -23,6 +23,7 @@ void drawPart(saturn::Geometry& geometry, const Aabb& local, float yaw, glm::vec
 {
     Material material;
     material.depthBias = depthBias;
+    material.specular = 0.8f; // polished metal
     const auto faces = boxFaces(local);
     for (std::size_t f = 0; f < faces.size(); ++f) {
         const BoxFace& face = faces[f];

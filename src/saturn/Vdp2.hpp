@@ -64,7 +64,8 @@ inline constexpr std::uint8_t kBack = 1u << 0;
 inline constexpr std::uint8_t kNbg0 = 1u << 1;
 inline constexpr std::uint8_t kRbg0 = 1u << 2;
 inline constexpr std::uint8_t kSprite = 1u << 3; ///< everything VDP1 drew
-inline constexpr std::uint8_t kAll = kBack | kNbg0 | kRbg0 | kSprite;
+inline constexpr std::uint8_t kNbg1 = 1u << 4;   ///< the water reflection layer
+inline constexpr std::uint8_t kAll = kBack | kNbg0 | kRbg0 | kSprite | kNbg1;
 } // namespace layer
 
 /// A colour offset register: signed values (-256..255) added to each 8-bit channel.
@@ -74,6 +75,18 @@ struct ColorOffset {
     int b = 0;
 
     friend constexpr bool operator==(const ColorOffset&, const ColorOffset&) = default;
+};
+
+/// One scanline of a line window: pixels with start <= x < end are inside.
+struct LineSpan {
+    std::int16_t start = 0;
+    std::int16_t end = 0;
+};
+
+/// One line scroll table entry: which source line to show on this scanline, shifted sideways.
+struct LineScroll {
+    std::int16_t row = 0;
+    std::int16_t offsetX = 0;
 };
 
 /// Per-frame VDP2 register state (scroll values, rotation parameters, ...).
@@ -98,6 +111,20 @@ struct Vdp2Registers {
     float fadeStart = 20.0f;
     float fadeEnd = 120.0f;
     ColorWord hazeColor = rgb(200, 220, 240);
+
+    /// Window 0 as a line window: a span per scanline, computed by the CPU each frame. VDP1
+    /// commands with user clipping are clipped to it too (see pmod::kUserClip).
+    std::uint32_t windowTableAddress = 0;
+    std::array<LineSpan, kScreenHeight> window{};
+
+    /// NBG1, the water layer: inside window 0 it replaces RBG0 with a reflection of the sky.
+    /// Each scanline shows the line given by the line scroll table (mirrored about the
+    /// horizon) shifted sideways for ripples, blended towards `waterColor`.
+    bool waterEnabled = false;
+    std::uint32_t reflectionTableAddress = 0;
+    std::array<LineScroll, kScreenHeight> reflection{};
+    ColorWord waterColor = rgb(40, 90, 120);
+    int waterRatio = 10; ///< colour calculation ratio towards waterColor, 0..31
 
     /// NBG0 bitmap whose bottom row sits on the horizon, scrolled horizontally with the camera yaw.
     bool cloudsEnabled = false;

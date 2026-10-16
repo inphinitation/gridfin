@@ -140,3 +140,21 @@ TEST_CASE("the game fades in from black and tints the backgrounds at dusk")
     CHECK(registers.colorOffsetA.b < 0);
     CHECK(registers.colorOffsetB == saturn::ColorOffset{}); // sprites are lit by their own lights instead
 }
+
+TEST_CASE("the pond is visible from beside it and turns on the water layer")
+{
+    saturn::Machine machine;
+    Game game;
+    REQUIRE(game.init(machine));
+    game.spawn(-4.5f, 5.0f, 0.0f);
+    game.render(machine);
+    CHECK(machine.vdp2Registers.waterEnabled);
+    int insideLines = 0;
+    for (const auto& span : machine.vdp2Registers.window) insideLines += span.end > span.start ? 1 : 0;
+    CHECK(insideLines > 20);
+
+    // Facing away from it, the window is empty and the layer off.
+    game.spawn(-4.5f, 8.0f, kPi);
+    game.render(machine);
+    CHECK_FALSE(machine.vdp2Registers.waterEnabled);
+}
