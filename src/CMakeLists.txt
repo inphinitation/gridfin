@@ -2,10 +2,10 @@
 add_library(gridfin_engine STATIC
     core/Log.hpp
     core/Math.hpp
-    data/Archive.cpp
-    data/Archive.hpp
     data/Config.cpp
     data/Config.hpp
+    data/Pak.cpp
+    data/Pak.hpp
     data/Vfs.cpp
     data/Vfs.hpp
     data/Wav.cpp
@@ -43,10 +43,12 @@ add_library(gridfin_engine STATIC
     game/SoundBank.cpp
     game/SoundBank.hpp
     game/World.cpp
-    game/World.hpp)
+    game/World.hpp
+    script/ScriptVm.cpp
+    script/ScriptVm.hpp)
 add_library(gridfin::engine ALIAS gridfin_engine)
 target_include_directories(gridfin_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(gridfin_engine PUBLIC glm::glm)
+target_link_libraries(gridfin_engine PUBLIC glm::glm PRIVATE wren)
 gridfin_set_warnings(gridfin_engine)
 
 # --- The game executable ---------------------------------------------------------
@@ -122,13 +124,13 @@ if(EMSCRIPTEN)
             COMMENT "Serving the web build at http://localhost:8080")
     endif()
 else()
-    # Pack the base game into base.gfa next to the executable, with the game's own packer.
-    set(GRIDFIN_BASE_ARCHIVE "${PROJECT_BINARY_DIR}/bin/$<CONFIG>/base.gfa")
+    # Pack the base game into base.pak next to the executable, with the game's own packer.
+    set(GRIDFIN_BASE_ARCHIVE "${PROJECT_BINARY_DIR}/bin/$<CONFIG>/base.pak")
     add_custom_command(
         OUTPUT "${GRIDFIN_BASE_ARCHIVE}"
         COMMAND gridfin --pack "${PROJECT_SOURCE_DIR}/data/base" "${GRIDFIN_BASE_ARCHIVE}"
         DEPENDS gridfin ${GRIDFIN_BASE_DATA}
-        COMMENT "Packing data/base into base.gfa"
+        COMMENT "Packing data/base into base.pak"
         VERBATIM)
     add_custom_target(gridfin_data ALL DEPENDS "${GRIDFIN_BASE_ARCHIVE}")
 

@@ -30,8 +30,9 @@ struct AppOptions {
     bool mute = false;                         ///< don't open an audio device
     std::string renderMusicPath;               ///< render the music to a WAV file and exit
     float renderMusicSeconds = 30.0f;
-    std::vector<std::string> dataPaths;  ///< folders or archives to mount, later ones override
-    std::string packFolder, packArchive; ///< pack a source folder into an archive and exit
+    std::vector<std::string> dataPaths; ///< folders or .paks to mount, later ones override
+    std::string scriptModule;           ///< run a Wren module from the game data and exit
+    std::string packFolder, packFile;   ///< pack a source folder into a .pak and exit
 
     [[nodiscard]] static AppOptions parse(int argc, char** argv);
 };
@@ -56,6 +57,7 @@ private:
     void toggleFullscreen();
     void presentFrame();
     [[nodiscard]] bool renderMusic() const;
+    [[nodiscard]] bool runScript() const;
     [[nodiscard]] bool mountData();
     void reloadChangedData();
 

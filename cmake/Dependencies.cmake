@@ -7,6 +7,7 @@ include(FetchContent)
 set(GRIDFIN_SDL_VERSION "release-3.4.8" CACHE STRING "SDL3 git tag")
 set(GRIDFIN_GLM_VERSION "1.0.1" CACHE STRING "glm git tag")
 set(GRIDFIN_DOCTEST_VERSION "v2.4.12" CACHE STRING "doctest git tag")
+set(GRIDFIN_WREN_VERSION "0.4.0" CACHE STRING "Wren git tag")
 
 # --- SDL3: window, input, gamepads, main loop (native and Emscripten) --------
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
@@ -38,7 +39,32 @@ FetchContent_Declare(glm
     GIT_SHALLOW TRUE
     SYSTEM)
 
-FetchContent_MakeAvailable(SDL3 glm)
+# --- Wren: the scripting language for game data ---------------------------------
+# Wren has no CMake build; the sources are compiled below. PatchWren.cmake adds the execution
+# budget hook (see src/script/ScriptVm.cpp).
+FetchContent_Declare(wren
+    GIT_REPOSITORY https://github.com/wren-lang/wren.git
+    GIT_TAG ${GRIDFIN_WREN_VERSION}
+    GIT_SHALLOW TRUE
+    PATCH_COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_LIST_DIR}/PatchWren.cmake"
+    UPDATE_DISCONNECTED TRUE
+    SOURCE_SUBDIR no-cmake-build
+    SYSTEM)
+
+FetchContent_MakeAvailable(SDL3 glm wren)
+
+file(GLOB GRIDFIN_WREN_SOURCES "${wren_SOURCE_DIR}/src/vm/*.c" "${wren_SOURCE_DIR}/src/optional/*.c")
+add_library(wren STATIC ${GRIDFIN_WREN_SOURCES})
+target_include_directories(wren SYSTEM PUBLIC "${wren_SOURCE_DIR}/src/include")
+target_include_directories(wren PRIVATE "${wren_SOURCE_DIR}/src/vm" "${wren_SOURCE_DIR}/src/optional")
+# The optional "random" module stays; "meta" (compiling source at runtime) is left out.
+target_compile_definitions(wren PRIVATE WREN_OPT_META=0)
+set_target_properties(wren PROPERTIES C_STANDARD 99 FOLDER "Dependencies")
+if(MSVC)
+    target_compile_options(wren PRIVATE /W0)
+else()
+    target_compile_options(wren PRIVATE -w)
+endif()
 
 if(GRIDFIN_BUILD_TESTS AND NOT EMSCRIPTEN)
     FetchContent_Declare(doctest

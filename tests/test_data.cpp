@@ -1,5 +1,5 @@
-#include "data/Archive.hpp"
 #include "data/Config.hpp"
+#include "data/Pak.hpp"
 #include "data/Vfs.hpp"
 #include "data/Wav.hpp"
 #include "game/SoundBank.hpp"
@@ -53,50 +53,69 @@ TEST_CASE("Data paths are normalised and can't escape their source")
     CHECK_FALSE(resolveRelative("sound/kick.tone", "../../outside.wav"));
 }
 
-TEST_CASE("Archives round-trip and later mounts override earlier ones")
+TEST_CASE(".pak archives round-trip and later mounts override earlier ones")
 {
     MemorySource base("base");
     base.add("gridfin.cfg", "title = Base");
     base.add("sound/a.bin", Bytes{1, 2, 3});
     base.add("sound/b.bin", Bytes{});
+    base.add("sound/tones/deep/x.tone", "program = 1");
+    base.add("sound-extra.txt", "sorts between sound and sound/...");
 
-    const Bytes image = packArchive(base);
+    const Bytes image = buildPak(base);
     std::string error;
-    auto archive = openArchive(image, "base.gfa", &error);
-    REQUIRE_MESSAGE(archive, error);
-    CHECK(archive->list() == std::vector<std::string>{"gridfin.cfg", "sound/a.bin", "sound/b.bin"});
-    CHECK(archive->read("sound/a.bin") == Bytes{1, 2, 3});
-    CHECK(archive->read("sound/b.bin") == Bytes{});
+    auto pak = PakSource::open(image, "base.pak", &error);
+    REQUIRE_MESSAGE(pak, error);
+    CHECK(pak->list() == base.list());
+    CHECK(pak->read("sound/a.bin") == Bytes{1, 2, 3});
+    CHECK(pak->read("sound/b.bin") == Bytes{});
+    CHECK(pak->read("sound/tones/deep/x.tone") == base.read("sound/tones/deep/x.tone"));
+    CHECK_FALSE(pak->read("sound"));            // a folder, not a file
+    CHECK_FALSE(pak->read("sound/a.bin/more")); // below a file
+    CHECK_FALSE(pak->read("sound/c.bin"));
 
-    // A flipped byte in the data fails the checksum.
+    // A flipped byte in a file fails its checksum.
     Bytes corrupt = image;
-    corrupt[16] ^= 0xffu;
-    CHECK_FALSE(openArchive(corrupt, "bad.gfa", &error));
+    corrupt[corrupt.size() - 1] ^= 0xffu;
+    CHECK_FALSE(PakSource::open(corrupt, "bad.pak", &error));
     CHECK(error.find("corrupt") != std::string::npos);
-    CHECK_FALSE(openArchive(Bytes{'n', 'o', 'p', 'e'}, "x", &error));
+    CHECK_FALSE(PakSource::open(Bytes{'n', 'o', 'p', 'e'}, "x", &error));
+
+    // Folder entries must be sorted (lookups binary-search them): swap the names of two siblings.
+    Bytes unsorted = image;
+    const auto get32 = [&](std::size_t at) {
+        return static_cast<std::uint32_t>(unsorted[at] | unsorted[at + 1] << 8 | unsorted[at + 2] << 16
+                                          | unsorted[at + 3] << 24);
+    };
+    const std::uint32_t nodeTable = get32(12);
+    // The root's children are nodes 1..3: gridfin.cfg, sound, sound-extra.txt. Swap 1 and 3's name fields.
+    for (std::size_t i = 0; i < 8; ++i) std::swap(unsorted[nodeTable + 16 + i], unsorted[nodeTable + 48 + i]);
+    CHECK_FALSE(PakSource::open(unsorted, "unsorted.pak", &error));
+    CHECK(error.find("not sorted") != std::string::npos);
 
     auto mod = std::make_unique<MemorySource>("mod");
     mod->add("gridfin.cfg", "title = Mod");
     mod->add("sound/c.bin", Bytes{9});
     Vfs vfs;
-    vfs.mount(std::move(archive));
+    vfs.mount(std::move(pak));
     vfs.mount(std::move(mod));
     CHECK(vfs.readText("gridfin.cfg") == "title = Mod");
     CHECK(vfs.origin("gridfin.cfg") == "mod");
-    CHECK(vfs.origin("sound/a.bin") == "base.gfa");
-    CHECK(vfs.list("sound/") == std::vector<std::string>{"sound/a.bin", "sound/b.bin", "sound/c.bin"});
+    CHECK(vfs.origin("sound/a.bin") == "base.pak");
+    CHECK(vfs.list("sound/")
+          == std::vector<std::string>{"sound/a.bin", "sound/b.bin", "sound/c.bin", "sound/tones/deep/x.tone"});
     CHECK_FALSE(vfs.read("../gridfin.cfg"));
 }
 
-TEST_CASE("The base game folder packs into an archive with the same files")
+TEST_CASE("The base game folder packs into a .pak with the same files")
 {
     DirectorySource folder(GRIDFIN_DATA_DIR);
     const auto files = folder.list();
     CHECK(std::ranges::find(files, "gridfin.cfg") != files.end());
-    auto archive = openArchive(packArchive(folder), "base.gfa");
-    REQUIRE(archive);
-    CHECK(archive->list() == files);
-    for (const std::string& path : files) CHECK(archive->read(path) == folder.read(path));
+    auto pak = PakSource::open(buildPak(folder), "base.pak");
+    REQUIRE(pak);
+    CHECK(pak->list() == files);
+    for (const std::string& path : files) CHECK(pak->read(path) == folder.read(path));
 }
 
 TEST_CASE("Config reads typed values and reports mistakes with line numbers")

@@ -2,9 +2,10 @@
 
 #include "app/Screenshot.hpp"
 #include "core/Log.hpp"
-#include "data/Archive.hpp"
 #include "data/Config.hpp"
+#include "data/Pak.hpp"
 #include "data/Wav.hpp"
+#include "script/ScriptVm.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -65,9 +66,11 @@ AppOptions AppOptions::parse(int argc, char** argv)
             options.renderMusicSeconds = std::clamp(std::strtof(argv[++i], nullptr), 0.1f, 600.0f);
         } else if (arg == "--data" && hasValue) {
             options.dataPaths.emplace_back(argv[++i]);
+        } else if (arg == "--script" && hasValue) {
+            options.scriptModule = argv[++i];
         } else if (arg == "--pack" && i + 2 < argc) {
             options.packFolder = argv[++i];
-            options.packArchive = argv[++i];
+            options.packFile = argv[++i];
         } else if (arg == "--ntsc") {
             options.present.ntsc = true;
         } else if (arg == "--filter" && hasValue) {
@@ -117,6 +120,16 @@ bool App::renderMusic() const
     return true;
 }
 
+bool App::runScript() const
+{
+    script::ScriptVm vm(m_data);
+    const bool ok = vm.runModule(m_options.scriptModule);
+    for (const std::string& error : vm.errors()) log::error("{}", error);
+    log::info("Script {}: {} steps, {} KB of memory (peak {} KB)", ok ? "finished" : "failed", vm.stats().steps,
+              vm.stats().memoryBytes / 1024, vm.stats().peakMemoryBytes / 1024);
+    return ok;
+}
+
 bool App::mountData()
 {
     // Explicit --data paths, in order (later ones override earlier ones).
@@ -130,14 +143,14 @@ bool App::mountData()
     }
     if (!m_data.empty()) return true;
 
-    // Otherwise the base game: the source folder in dev builds (so edits reload live), else the
-    // packed archive next to the executable, else a data folder (the web build preloads one).
+    // Otherwise the base game: the source folder in dev builds (so edits reload live), else
+    // base.pak next to the executable, else a data folder (the web build preloads one).
     std::vector<std::filesystem::path> candidates;
 #if defined(GRIDFIN_DATA_DIR)
     candidates.emplace_back(GRIDFIN_DATA_DIR);
 #endif
     if (const char* base = SDL_GetBasePath()) {
-        candidates.push_back(std::filesystem::path(base) / "base.gfa");
+        candidates.push_back(std::filesystem::path(base) / "base.pak");
         candidates.push_back(std::filesystem::path(base) / "data" / "base");
     }
     candidates.emplace_back("data/base");
@@ -151,7 +164,7 @@ bool App::mountData()
         }
         log::warn("Cannot mount {}", error);
     }
-    log::error("No game data found (looked for base.gfa or data/base); pass --data <folder or .gfa>");
+    log::error("No game data found (looked for base.pak or data/base); pass --data <folder or .pak>");
     return false;
 }
 
@@ -170,15 +183,16 @@ SDL_AppResult App::init()
     SDL_SetAppMetadata("Gridfin", "0.1.0", "dev.gridfin.game");
     if (!m_options.packFolder.empty()) {
         std::string error;
-        if (!data::packDirectory(m_options.packFolder, m_options.packArchive, &error)) {
+        if (!data::packFolder(m_options.packFolder, m_options.packFile, &error)) {
             log::error("Packing failed: {}", error);
             return SDL_APP_FAILURE;
         }
-        log::info("Packed {} into {}", m_options.packFolder, m_options.packArchive);
+        log::info("Packed {} into {}", m_options.packFolder, m_options.packFile);
         return SDL_APP_SUCCESS;
     }
     if (!mountData()) return SDL_APP_FAILURE;
     if (!m_options.renderMusicPath.empty()) return renderMusic() ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
+    if (!m_options.scriptModule.empty()) return runScript() ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         log::error("SDL_Init failed: {}", SDL_GetError());
         return SDL_APP_FAILURE;

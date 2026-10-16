@@ -1,6 +1,6 @@
 #include "data/Vfs.hpp"
 
-#include "data/Archive.hpp"
+#include "data/Pak.hpp"
 
 #include <algorithm>
 #include <format>
@@ -169,13 +169,13 @@ bool Vfs::mountPath(const fs::path& path, std::string* error)
     }
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        if (error) *error = std::format("{} is neither a folder nor a readable archive", path.string());
+        if (error) *error = std::format("{} is neither a folder nor a readable .pak", path.string());
         return false;
     }
-    const Bytes image((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    auto archive = openArchive(image, path.string(), error);
-    if (!archive) return false;
-    mount(std::move(archive));
+    Bytes image((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto pak = PakSource::open(std::move(image), path.string(), error);
+    if (!pak) return false;
+    mount(std::move(pak));
     return true;
 }
 

@@ -4,7 +4,7 @@ Gridfin's executable is an engine that plays a game from its data. The data is a
 read through a virtual file system (`src/data/Vfs.*`). It can come from two kinds of source:
 
 - a **source folder**, the form you edit (and keep in git). The base game is `data/base/`;
-- a **packed archive** (`.gfa`), the form you ship: one file holding the same tree.
+- a **`.pak` archive**, the form you ship: one file holding the same tree.
 
 ## Mounting
 
@@ -12,13 +12,13 @@ Sources are mounted in order, and a file in a later source replaces the same pat
 ship only the files it changes (like a Doom PWAD over the IWAD):
 
 ```sh
-gridfin --data base.gfa --data mymod/          # mymod/sound/music/fields.mml replaces the base song
+gridfin --data base.pak --data mymod/          # mymod/sound/music/fields.mml replaces the base song
 ```
 
 Without `--data`, the game looks for, in order:
 
 1. the source folder `data/base/` in the source tree (dev builds only, so edits show up live);
-2. `base.gfa` next to the executable (the build packs it from `data/base/`);
+2. `base.pak` next to the executable (the build packs it from `data/base/`);
 3. `data/base/` next to the executable, then in the working directory (the web build preloads this folder).
 
 ## Live reload
@@ -56,14 +56,26 @@ prefixes the keys after it, values may be quoted. Unknown keys and out-of-range 
 | `reverb.room`, `reverb.damping` | Reverb feedback (0..0.98) and high-frequency damping (0..1) |
 | `reverb.level` | Reverb return level, 0..7 |
 
-## Archive format (`.gfa`)
+## The `.pak` format
 
-`gridfin --pack <folder> <file.gfa>` packs a source folder. All integers are little-endian:
+`gridfin --pack <folder> <file.pak>` packs a source folder. A `.pak` stores the folder tree itself: every folder's
+entries are contiguous and sorted by name, so finding `sound/tones/bass.tone` means a binary search among the root's
+entries for `sound`, then among `sound`'s for `tones`, and so on. Lookups run straight on the file's bytes; nothing is
+indexed at load time. All integers are little-endian:
 
 ```
-header     "GFA1", u32 version (1), u32 entry count, u32 directory offset
-data       the files, each aligned to 4 bytes
-directory  per entry, sorted by path: u16 path length, path (UTF-8), u32 offset, u32 size, u32 CRC-32
+header    32 bytes
+          "GPAK", u32 version (1), u32 node count, u32 node table offset,
+          u32 name table offset, u32 name table size, u32 data offset, u32 reserved (0)
+nodes     16 bytes each, node 0 is the root folder
+          u32 name offset, u16 name length, u16 flags (bit 0: folder),
+          folder: u32 first child node, u32 child count
+          file:   u32 data offset, u32 size
+CRC-32s   u32 per node, right after the node table (0 for folders)
+names     UTF-8, not terminated (the root's is empty)
+data      the files, each aligned to 4 bytes
 ```
 
-Archives are checked when they are opened: structure, paths and every file's CRC-32.
+Nodes are numbered breadth first, so a folder's children always come after it. A `.pak` is checked when it is
+opened: every name must be a valid path part, every folder's entries sorted and unique, every node but the root in
+exactly one folder, and every file's CRC-32 must match.

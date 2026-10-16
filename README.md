@@ -33,8 +33,8 @@ edit (changes reload live), packed into a single archive to ship, with mods laye
 `data/base/`.
 
 See [docs/SATURN.md](docs/SATURN.md) for what is emulated and where it deviates from the real hardware,
-[docs/DATA.md](docs/DATA.md) for the data folder and archive format, and [docs/SOUND.md](docs/SOUND.md) for tone
-files and MML.
+[docs/DATA.md](docs/DATA.md) for the data folder and `.pak` format, [docs/SOUND.md](docs/SOUND.md) for tone
+files and MML, and [docs/SCRIPTING.md](docs/SCRIPTING.md) for Wren scripts.
 
 ## Tech stack
 
@@ -46,6 +46,7 @@ files and MML.
 | Graphics | WebGPU (`webgpu.h`): [wgpu-native](https://github.com/gfx-rs/wgpu-native) on desktop (Vulkan / Metal / D3D12), Dawn's [emdawnwebgpu](https://dawn.googlesource.com/dawn/+/refs/heads/main/src/emdawnwebgpu/) in the browser |
 | Shaders | WGSL, embedded at build time, hot-reloadable in dev builds |
 | Web | Emscripten (`--use-port=emdawnwebgpu`) |
+| Scripting | [Wren](https://wren.io) 0.4.0, sandboxed, with step and memory budgets |
 | Math / tests | glm, doctest + CTest |
 | Tooling | clangd, clang-format, clang-tidy, VS Code workspace, GitHub Actions (all platforms + GitHub Pages) |
 
@@ -120,10 +121,11 @@ when you push to `main` (enable Pages with **GitHub Actions** as the source).
   `--capture-display` to start with display filters and save the filtered window output instead. CI uses this as a
   smoke test on a software Vulkan driver. `--mute` runs without opening an audio device.
 - **Game data:** dev builds read `data/base/` from the source tree and reload edited files live. Other builds use
-  `base.gfa`, which the build packs next to the executable (`gridfin --pack <folder> <file.gfa>` does it by hand).
-  `--data <folder or .gfa>` mounts data explicitly; repeat it to layer a mod over the base game.
+  `base.pak`, which the build packs next to the executable (`gridfin --pack <folder> <file.pak>` does it by hand).
+  `--data <folder or .pak>` mounts data explicitly; repeat it to layer a mod over the base game.
 - **Music:** `gridfin --render-music out.wav 30` renders 30 seconds of the soundtrack to a WAV file and exits,
   without opening a window. The song is `data/base/sound/music/fields.mml`.
+- **Scripts:** `gridfin --script scripts/hello` runs a Wren module from the game data and exits.
 - **Formatting and linting:** `.clang-format` and `.clang-tidy` are included. CI checks formatting
   (`git ls-files '*.cpp' '*.hpp' | xargs clang-format -i` fixes it).
 - **Dependency versions** are set in `cmake/Dependencies.cmake` and `cmake/WebGPU.cmake`. The wgpu-native downloads
@@ -136,7 +138,8 @@ cmake/            Build helpers: dependencies, WebGPU provider, warnings, shader
 data/base/        The base game's data: manifest, tones, samples, songs
 shaders/          WGSL: vdp.wgsl (VDP1 + VDP2), present.wgsl (scaling to the window)
 src/core/         Logging, math helpers
-src/data/         Virtual file system, archives, the config format, WAVE files
+src/data/         Virtual file system, .pak archives, the config format, WAVE files
+src/script/       The Wren VM: module loading, sandbox, budgets, foreign methods
 src/saturn/       The emulated hardware model: VDP1/VDP2 memory, command format, geometry stage, SCSP sound
                   chip and sound driver
 src/game/         Game logic: assets (procedural, in Saturn formats), sound bank and music, world, player,

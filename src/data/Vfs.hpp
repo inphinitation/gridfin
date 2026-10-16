@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-/// The game's data lives in mounted sources: a source folder (for editing) or a packed archive
+/// The game's data lives in mounted sources: a source folder (for editing) or a `.pak` archive
 /// (for shipping). Later mounts override files of the same path in earlier ones, so a mod
 /// archive can replace single files of the base game, like a Doom PWAD.
 namespace gridfin::data {
@@ -52,7 +52,7 @@ private:
     std::map<std::string, std::filesystem::file_time_type> m_stamps;
 };
 
-/// Files held in memory: a loaded archive, or test data.
+/// Files held in memory (test data, generated files).
 class MemorySource final : public Source {
 public:
     explicit MemorySource(std::string name = "memory") : m_name(std::move(name)) {}
@@ -71,7 +71,7 @@ class Vfs {
 public:
     /// Adds a source on top of the existing ones.
     void mount(std::unique_ptr<Source> source);
-    /// Mounts a folder or a packed archive (`.gfa`). Returns false with a message on failure.
+    /// Mounts a folder or a `.pak` archive. Returns false with a message on failure.
     bool mountPath(const std::filesystem::path& path, std::string* error = nullptr);
 
     [[nodiscard]] std::optional<Bytes> read(std::string_view path) const;

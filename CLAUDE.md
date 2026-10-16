@@ -30,9 +30,12 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
   tints and fades use the VDP2 colour offset registers. Animate colours by palette cycling (`TextureCache::setLut`),
   not by shader effects. Reflections are mirrored geometry between `Geometry::beginReflection/endReflection`,
   clipped to a CPU-computed VDP2 line window (`saturn::computeLineWindow`).
-- Game content is data, not code: it lives in `data/base/` and is read through `data::Vfs` (folders or `.gfa`
+- Game content is data, not code: it lives in `data/base/` and is read through `data::Vfs` (folders or `.pak`
   archives, later mounts override earlier ones). Formats are documented in `docs/DATA.md` and `docs/SOUND.md`;
   update them with any format change. Loaders report problems as `file:line: message` and keep going.
+- Scripts are Wren modules in the game data, run by `script::ScriptVm` (sandboxed, step and memory budgets; see
+  `docs/SCRIPTING.md`). Engine features reach scripts only through bound foreign methods. Don't patch Wren beyond
+  `cmake/PatchWren.cmake`.
 - Audio goes through the SCSP model: samples live in `saturn::Scsp` sound RAM (512 KB, shared with the driver area
   and the reverb delay lines), music is MML played by `saturn::SoundDriver` on its 32 slots. No host-side mixing or
   effects; `platform/Audio` only copies the SCSP output to SDL.
