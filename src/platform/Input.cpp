@@ -69,6 +69,7 @@ void Input::handleEvent(const SDL_Event& event)
         if (event.key.repeat) break;
         if (event.key.scancode == SDL_SCANCODE_SPACE) m_jumpPressed = true;
         if (event.key.scancode == SDL_SCANCODE_V) m_togglePressed = true;
+        if (event.key.scancode == SDL_SCANCODE_T) m_duskPressed = true;
         if (event.key.scancode == SDL_SCANCODE_ESCAPE && m_mouseCaptured) setMouseCaptured(false);
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
@@ -77,6 +78,7 @@ void Input::handleEvent(const SDL_Event& event)
         case SDL_GAMEPAD_BUTTON_SOUTH: m_jumpPressed = true; break;
         case SDL_GAMEPAD_BUTTON_NORTH:
         case SDL_GAMEPAD_BUTTON_RIGHT_STICK: m_togglePressed = true; break;
+        case SDL_GAMEPAD_BUTTON_BACK: m_duskPressed = true; break;
         case SDL_GAMEPAD_BUTTON_DPAD_UP: ++m_dpadZoom; break;
         case SDL_GAMEPAD_BUTTON_DPAD_DOWN: --m_dpadZoom; break;
         default: break;
@@ -136,6 +138,7 @@ InputState Input::frame(float dt)
     state.jumpHeld = jumpHeld;
     state.jumpPressed = m_jumpPressed;
     state.toggleViewPressed = m_togglePressed;
+    state.toggleDuskPressed = m_duskPressed;
     state.device = m_device;
 
     m_mouseDelta = glm::vec2(0.0f);
@@ -143,6 +146,7 @@ InputState Input::frame(float dt)
     m_dpadZoom = 0;
     m_jumpPressed = false;
     m_togglePressed = false;
+    m_duskPressed = false;
     return state;
 }
 

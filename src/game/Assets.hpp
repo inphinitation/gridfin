@@ -20,10 +20,15 @@ struct Assets {
     saturn::TextureId fin = saturn::kNoTexture;
     saturn::TextureId shadow = saturn::kNoTexture;
     saturn::TextureId tree = saturn::kNoTexture;
+    saturn::TextureId fire = saturn::kNoTexture; ///< animated by palette cycling, see fireLut()
 
     // VDP2 bitmaps
     saturn::Bitmap ground;
     saturn::Bitmap clouds;
+
+    /// The fire texture's lookup table at `time`: its colours rotate through the
+    /// flame bands 15 times a second, the classic palette cycling animation.
+    [[nodiscard]] static saturn::Lut fireLut(float time);
 
     /// Generates everything; returns false if work RAM or VDP2 VRAM ran out.
     [[nodiscard]] bool load(saturn::TextureCache& textures, saturn::Vdp2Vram& vdp2);

@@ -178,6 +178,21 @@ void TextureCache::release(TextureId id)
     }
 }
 
+bool TextureCache::setLut(TextureId id, const Lut& lut)
+{
+    if (id >= m_textures.size()) return false;
+    Entry& entry = m_textures[id];
+    if (entry.texture.mode != ColorMode::Lut16) return false;
+    entry.lut = packLut(lut);
+    if (entry.resident) {
+        m_vram.writeData(entry.blockAddress, entry.lut);
+        const auto bytes = static_cast<std::uint32_t>(entry.lut.size());
+        m_dmaUsed += bytes;
+        m_stats.dmaBytes += bytes;
+    }
+    return true;
+}
+
 void TextureCache::evictAll()
 {
     for (std::size_t id = 0; id < m_textures.size(); ++id) {

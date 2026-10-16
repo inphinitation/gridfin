@@ -34,6 +34,15 @@ struct Tree {
     float height = 4.0f;
 };
 
+/// A stone pillar with a fire on top that lights its surroundings.
+struct Brazier {
+    static constexpr float kPillarHeight = 0.9f;
+    glm::vec3 base{0.0f};
+
+    [[nodiscard]] glm::vec3 flameBase() const noexcept { return base + glm::vec3(0.0f, kPillarHeight, 0.0f); }
+    [[nodiscard]] glm::vec3 lightPosition() const noexcept { return flameBase() + glm::vec3(0.0f, 0.45f, 0.0f); }
+};
+
 /// The level: textured blocks standing on the infinite VDP2 ground plane.
 class World {
 public:
@@ -45,6 +54,7 @@ public:
 
     [[nodiscard]] const std::vector<Block>& blocks() const noexcept { return m_blocks; }
     [[nodiscard]] const std::vector<Tree>& trees() const noexcept { return m_trees; }
+    [[nodiscard]] const std::vector<Brazier>& braziers() const noexcept { return m_braziers; }
 
     /// Collision boxes: blocks plus tree trunks.
     [[nodiscard]] const std::vector<Aabb>& colliders() const noexcept { return m_colliders; }
@@ -60,9 +70,11 @@ public:
 private:
     void addBlock(glm::vec3 min, glm::vec3 max, BlockStyle style);
     void addTree(glm::vec3 base, float height);
+    void addBrazier(glm::vec3 base);
 
     std::vector<Block> m_blocks;
     std::vector<Tree> m_trees;
+    std::vector<Brazier> m_braziers;
     std::vector<Aabb> m_colliders;
 };
 

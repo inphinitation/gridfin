@@ -57,9 +57,13 @@ jobs:
           test -s gridfin-linux.bmp
           # The window output with the CRT and NTSC filters.
           xvfb-run -a -s "-screen 0 1280x960x24" \
-            ./build/native-ci/bin/Release/gridfin --frames 30 --filter crt --ntsc --capture-display \
+            ./build/native-ci/bin/Release/gridfin --frames 60 --filter crt --ntsc --capture-display \
             --screenshot gridfin-linux-crt.bmp
           test -s gridfin-linux-crt.bmp
+          # Dusk: point lights and the VDP2 colour offset.
+          xvfb-run -a -s "-screen 0 1280x960x24" \
+            ./build/native-ci/bin/Release/gridfin --frames 60 --dusk --screenshot gridfin-linux-dusk.bmp
+          test -s gridfin-linux-dusk.bmp
 
       - name: Upload screenshot
         if: runner.os == 'Linux'

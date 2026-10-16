@@ -2,7 +2,9 @@
 
 #include "core/Log.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace gridfin {
 
@@ -13,6 +15,11 @@ constexpr ColorWord kZenith = rgbHex(0x1C4AA0);
 constexpr ColorWord kSky = rgbHex(0x4C8ED8);
 constexpr ColorWord kHorizon = rgbHex(0xB8D8F0);
 constexpr glm::vec3 kSpawn{0.0f, 0.0f, 6.0f};
+constexpr float kFadeSeconds = 0.8f;
+constexpr float kDuskSeconds = 2.0f;
+/// Dusk tint for the VDP2 backgrounds, in 8-bit colour offset steps.
+constexpr ColorOffset kDuskOffset{-72, -84, -28};
+constexpr glm::vec3 kFireColor{1.0f, 0.55f, 0.2f};
 } // namespace
 
 bool Game::init(Machine& machine)
@@ -29,6 +36,12 @@ void Game::update(float dt, const InputState& input)
 {
     m_time += dt;
     m_cameraRig.handleInput(input);
+
+    // Fade in from black at start-up, and ease between day and dusk.
+    m_fade = std::max(0.0f, m_fade - dt / kFadeSeconds);
+    if (input.toggleDuskPressed) m_dusk = !m_dusk;
+    const float duskStep = dt / kDuskSeconds;
+    m_duskAmount = std::clamp(m_duskAmount + (m_dusk ? duskStep : -duskStep), 0.0f, 1.0f);
 
     // Fixed-step simulation; buffered presses survive frames that run no step.
     m_jumpLatch = m_jumpLatch || input.jumpPressed;
@@ -73,18 +86,61 @@ void Game::computeSky(const View& view, Vdp2Registers& registers) const
     registers.cloudScrollX = view.yaw / kTau * 1024.0f + m_time * 1.5f;
 }
 
+Lighting Game::frameLighting() const
+{
+    Lighting lighting = m_lighting;
+    const float dusk = m_duskAmount;
+    lighting.ambient = glm::mix(m_lighting.ambient, 0.3f, dusk);
+    lighting.diffuse = glm::mix(m_lighting.diffuse, 0.12f, dusk);
+    // By day the distance haze brightens towards the sky; at dusk it darkens into the night.
+    lighting.hazeSteps = static_cast<int>(std::lround(glm::mix(static_cast<float>(m_lighting.hazeSteps), -7.0f, dusk)));
+
+    // Fires flicker; only the nearest few get a light, as lighting costs CPU time per vertex.
+    std::vector<const Brazier*> braziers;
+    for (const Brazier& brazier : m_world.braziers()) braziers.push_back(&brazier);
+    const glm::vec3 focus = m_player.position();
+    std::sort(braziers.begin(), braziers.end(), [&](const Brazier* a, const Brazier* b) {
+        return glm::distance(a->base, focus) < glm::distance(b->base, focus);
+    });
+    for (std::size_t i = 0; i < braziers.size() && i < Lighting::kMaxPointLights; ++i) {
+        const float seed = static_cast<float>(i) * 1.7f;
+        const float flicker = 0.85f + 0.1f * std::sin(m_time * 13.0f + seed) + 0.05f * std::sin(m_time * 31.0f + seed);
+        const float strength = glm::mix(0.55f, 1.0f, dusk) * flicker;
+        lighting.addPointLight({braziers[i]->lightPosition(), kFireColor * strength, glm::mix(5.0f, 7.0f, dusk)});
+    }
+    return lighting;
+}
+
+void Game::setColorOffset(Vdp2Registers& registers) const
+{
+    // Offset A tints the backgrounds for dusk; offset B is the sprite layer. Both carry the fade.
+    const int fade = static_cast<int>(std::lround(-255.0f * m_fade));
+    const auto scaled = [&](int value) {
+        return static_cast<int>(std::lround(static_cast<float>(value) * m_duskAmount));
+    };
+    registers.colorOffsetA = {std::max(-256, scaled(kDuskOffset.r) + fade),
+                              std::max(-256, scaled(kDuskOffset.g) + fade),
+                              std::max(-256, scaled(kDuskOffset.b) + fade)};
+    registers.colorOffsetB = {fade, fade, fade};
+    registers.colorOffsetEnable = layer::kAll;
+    registers.colorOffsetSelect = layer::kSprite;
+}
+
 void Game::render(Machine& machine) const
 {
     machine.view = View::fromCamera(m_cameraRig.camera());
 
     Geometry& geometry = machine.geometry;
-    geometry.begin(machine.view, m_lighting, &machine.textures);
+    geometry.begin(machine.view, frameLighting(), &machine.textures);
+    // Palette cycling: the fire's lookup table is rewritten in VRAM (32 bytes of DMA).
+    machine.textures.setLut(m_assets.fire, Assets::fireLut(m_time));
     m_world.draw(geometry, m_assets);
     m_player.draw(geometry, m_assets, m_world, m_player.interpolatedPosition(m_accumulator / kFixedStep),
                   !m_cameraRig.firstPerson());
     geometry.end(machine.vdp1);
 
     computeSky(machine.view, machine.vdp2Registers);
+    setColorOffset(machine.vdp2Registers);
 }
 
 } // namespace gridfin

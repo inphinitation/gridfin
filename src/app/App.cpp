@@ -45,6 +45,8 @@ AppOptions AppOptions::parse(int argc, char** argv)
             options.screenshotPath = argv[++i];
         } else if (arg == "--first-person") {
             options.startInFirstPerson = true;
+        } else if (arg == "--dusk") {
+            options.startAtDusk = true;
         } else if (arg == "--capture-display") {
             options.captureDisplay = true;
         } else if (arg == "--ntsc") {
@@ -102,6 +104,7 @@ SDL_AppResult App::init()
     m_machine = std::make_unique<saturn::Machine>();
     if (!m_game.init(*m_machine)) return SDL_APP_FAILURE;
     m_present = m_options.present;
+    m_game.setDusk(m_options.startAtDusk);
     if (m_options.startInFirstPerson) {
         InputState toggle;
         toggle.toggleViewPressed = true;
@@ -113,7 +116,7 @@ SDL_AppResult App::init()
     m_lastTicks = SDL_GetTicksNS();
 
     log::info("Controls: WASD/left stick move, mouse/right stick look, Space/A jump, Shift/X run,");
-    log::info("          wheel/d-pad zoom, V/Y first-third person, Esc release mouse,");
+    log::info("          wheel/d-pad zoom, V/Y first-third person, T/Back day-dusk, Esc release mouse,");
     log::info("          F2 display filter (sharp/scanlines/CRT), F6 NTSC composite, F3 scaling, F4 VDP1 timing,");
     log::info("          F5 reload shaders, F11 fullscreen, F12 screenshot (Shift+F12 with filters)");
     return SDL_APP_CONTINUE;

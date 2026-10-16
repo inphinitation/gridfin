@@ -15,6 +15,7 @@ struct InputState {
     bool jumpHeld = false;
     bool sprint = false;
     bool toggleViewPressed = false;
+    bool toggleDuskPressed = false;
     InputDevice device = InputDevice::KeyboardMouse;
 };
 

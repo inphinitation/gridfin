@@ -24,6 +24,9 @@ C++23 game that emulates the look *and limits* of the Sega Saturn, for desktop (
   2047 commands per frame. Assets are generated procedurally into Saturn formats in `src/game/Assets.cpp`.
 - VDP1 textures are registered in `saturn::TextureCache` (work RAM) and referenced by `TextureId`; never write
   textures into `Vdp1Vram` directly. Watch the VDP1 load in the window title: over 100% halves the frame rate.
+- Lighting is CPU-side, through gouraud tables (`saturn::Lighting`: sun, at most 4 point lights, haze). Screen-wide
+  tints and fades use the VDP2 colour offset registers. Animate colours by palette cycling (`TextureCache::setLut`),
+  not by shader effects.
 - `shaders/vdp.wgsl` decodes the same bytes the CPU writes; if you change a memory layout, update both sides and the
   uniform mirrors (`FrameUniforms` in `src/gfx/SaturnRenderer.cpp`).
 - Code against the standard `webgpu.h`; anything implementation specific must be behind `GRIDFIN_WGPU_NATIVE` or

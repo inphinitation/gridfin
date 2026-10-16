@@ -114,7 +114,12 @@ public:
     template <std::size_t N>
     TextureId texture(const char* name, const std::array<std::uint32_t, N>& colors, Image image)
     {
-        const auto id = m_textures.addLutTexture(image.width, image.height, image.pixels, makeLut(colors));
+        return texture(name, makeLut(colors), std::move(image));
+    }
+
+    TextureId texture(const char* name, const Lut& lut, Image image)
+    {
+        const auto id = m_textures.addLutTexture(image.width, image.height, image.pixels, lut);
         if (!id) {
             log::error("Work RAM texture budget exhausted while loading texture '{}'", name);
             m_ok = false;
@@ -325,6 +330,29 @@ Image treeImage()
     return image;
 }
 
+// Fire uses two groups of 7 palette entries: indices 1-7 for the hot core, 8-14 for the
+// outer flame. Each pixel picks an entry by its height and some noise, so rotating the
+// colours within a group makes bands of light climb up the flame.
+constexpr int kFireBand = 7;
+
+Image fireImage()
+{
+    Image image(16, 32);
+    image.fill([](int x, int y) -> std::uint8_t {
+        const float fx = (static_cast<float>(x) + 0.5f - 8.0f) / 8.0f;
+        const float fy = static_cast<float>(y) / 31.0f; // 0 = top, 1 = bottom
+        // A teardrop that widens towards the bottom, with a ragged edge.
+        const float width = 0.15f + 0.85f * std::sqrt(fy) - 0.25f * fy * fy;
+        const float edge = width * (0.8f + 0.35f * fbm(x, y, 16, 4, 2, 83));
+        const float distance = std::abs(fx) / std::max(edge, 1e-3f);
+        if (distance > 1.0f || fy < 0.05f) return 0;
+        const int band = (31 - y) / 3 + static_cast<int>(random01(x, y / 2, 89) * 2.0f);
+        const bool core = distance < 0.55f && fy > 0.35f;
+        return static_cast<std::uint8_t>((core ? 1 : 1 + kFireBand) + band % kFireBand);
+    });
+    return image;
+}
+
 // --- VDP2 bitmaps -------------------------------------------------------------
 
 Image groundImage()
@@ -372,6 +400,27 @@ Image cloudImage()
 
 } // namespace
 
+Lut Assets::fireLut(float time)
+{
+    // Brightness waves for each band; the core runs white-yellow to orange, the flame orange to red.
+    const int phase = static_cast<int>(time * 15.0f);
+    Lut lut{};
+    for (int i = 0; i < kFireBand; ++i) {
+        const float wave = 0.5f + 0.5f * std::cos(kTau * static_cast<float>(i + phase) / kFireBand);
+        const auto mix = [wave](std::uint32_t dark, std::uint32_t bright) {
+            const auto channel = [&](int shift) {
+                const float a = static_cast<float>((dark >> shift) & 0xFF);
+                const float b = static_cast<float>((bright >> shift) & 0xFF);
+                return static_cast<unsigned>(a + (b - a) * wave);
+            };
+            return rgb(channel(16), channel(8), channel(0));
+        };
+        lut[static_cast<std::size_t>(1 + i)] = mix(0xFF9020, 0xFFF0A0);
+        lut[static_cast<std::size_t>(1 + kFireBand + i)] = mix(0x901808, 0xF06818);
+    }
+    return lut;
+}
+
 bool Assets::load(TextureCache& textures, Vdp2Vram& vdp2)
 {
     Loader loader(textures, vdp2);
@@ -400,6 +449,7 @@ bool Assets::load(TextureCache& textures, Vdp2Vram& vdp2)
         robotFaceImage());
     fin = loader.texture("fin", std::array<std::uint32_t, 3>{0xC05010, 0xFF9A40, 0x803008}, finImage());
     shadow = loader.texture("shadow", std::array<std::uint32_t, 1>{0x000000}, shadowImage());
+    fire = loader.texture("fire", fireLut(0.0f), fireImage());
     tree = loader.texture(
         "tree",
         std::array<std::uint32_t, 8>{0x1E4A1C, 0x2A6426, 0x3A7E2E, 0x52983A, 0x74B44C, 0x5A3A1E, 0x6E4826, 0x2A3A20},

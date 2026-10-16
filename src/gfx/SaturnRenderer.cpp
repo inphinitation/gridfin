@@ -31,8 +31,10 @@ struct FrameUniforms {
     std::array<float, 4> sky;
     std::array<std::uint32_t, 4> vdp2;
     std::array<std::uint32_t, 4> sizes;
+    std::array<std::int32_t, 4> offsetA; ///< colour offset A (r, g, b), enable bits
+    std::array<std::int32_t, 4> offsetB; ///< colour offset B (r, g, b), select bits
 };
-static_assert(sizeof(FrameUniforms) == 160);
+static_assert(sizeof(FrameUniforms) == 192);
 
 /// Mirrors `Present` in shaders/present.wgsl.
 struct PresentUniforms {
@@ -407,6 +409,10 @@ void SaturnRenderer::writeFrameUniforms(const Machine& machine)
     frame.sizes = {size(registers.ground.width, registers.ground.height),
                    size(registers.clouds.width, registers.clouds.height),
                    size(registers.ground.bank, registers.clouds.bank), registers.hazeColor};
+    frame.offsetA = {registers.colorOffsetA.r, registers.colorOffsetA.g, registers.colorOffsetA.b,
+                     registers.colorOffsetEnable};
+    frame.offsetB = {registers.colorOffsetB.r, registers.colorOffsetB.g, registers.colorOffsetB.b,
+                     registers.colorOffsetSelect};
     wgpuQueueWriteBuffer(m_queue, m_frameUniforms.get(), 0, &frame, sizeof(frame));
 }
 

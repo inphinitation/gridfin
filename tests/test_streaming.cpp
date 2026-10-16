@@ -143,3 +143,28 @@ TEST_CASE("off-screen pixels are cheap but not free")
     CHECK(cycles > timing::kCyclesPerField); // still a real performance trap
     CHECK(cycles < timing::kCyclesPerField * 30);
 }
+
+TEST_CASE("palette cycling rewrites a resident lookup table through DMA")
+{
+    Vdp1Vram vram;
+    TextureCache cache(vram);
+    const TextureId id = addTexture(cache);
+    cache.beginFrame();
+    const auto texture = cache.acquire(id);
+    REQUIRE(texture);
+    (void)vram.takeDirtyRanges();
+
+    cache.beginFrame();
+    Lut lut{};
+    lut[1] = rgb555(31, 16, 0);
+    REQUIRE(cache.setLut(id, lut));
+    CHECK(vram.read16(texture->colr * 8u + 2u) == rgb555(31, 16, 0));
+    CHECK(cache.stats().dmaBytes == 32);
+    CHECK(vram.takeDirtyRanges().size() == 1);
+
+    // Non-LUT textures have no table to cycle.
+    const std::vector<ColorWord> rgbPixels(8 * 8, rgb555(1, 1, 1));
+    const auto rgbId = cache.addRgbTexture(8, 8, rgbPixels);
+    REQUIRE(rgbId);
+    CHECK_FALSE(cache.setLut(*rgbId, lut));
+}

@@ -108,21 +108,38 @@ Command Geometry::baseCommand(CommandType type, const Material& material, const 
     return command;
 }
 
-GouraudTable Geometry::shade(const std::array<glm::vec3, 4>& viewCorners, glm::vec3 normal, bool lit) const
+GouraudTable Geometry::shade(const std::array<glm::vec3, 4>& worldCorners, const std::array<glm::vec3, 4>& viewCorners,
+                             glm::vec3 normal, bool lit, bool sprite) const
 {
-    float light = 1.0f;
+    // Unlit materials (fire, effects) keep their texture colours; lit ones get the sun.
+    glm::vec3 base{1.0f};
     if (lit) {
-        light = m_lighting.ambient + m_lighting.diffuse * std::max(0.0f, glm::dot(normal, m_lighting.sunDirection));
+        base = glm::vec3(m_lighting.ambient
+                         + m_lighting.diffuse * std::max(0.0f, glm::dot(normal, m_lighting.sunDirection)));
     }
-    const int lightSteps = static_cast<int>(std::lround((light - 1.0f) * 16.0f));
 
     GouraudTable table{};
     const float hazeRange = std::max(m_lighting.hazeEnd - m_lighting.hazeStart, 1e-3f);
     for (std::size_t i = 0; i < 4; ++i) {
+        glm::vec3 light = base;
+        for (std::size_t l = 0; l < m_lighting.pointLightCount; ++l) {
+            const PointLight& point = m_lighting.pointLights[l];
+            const glm::vec3 toLight = point.position - worldCorners[i];
+            const float distance = glm::length(toLight);
+            if (distance >= point.radius) continue;
+            const float falloff = 1.0f - distance / point.radius;
+            // Surfaces facing away get nothing; sprites have no real normal and are lit from all sides.
+            const float facing =
+                sprite || distance < 1e-4f ? 1.0f : std::max(0.0f, glm::dot(normal, toLight / distance));
+            light += point.color * (falloff * falloff * facing);
+        }
+
         const float t = std::clamp((viewCorners[i].z - m_lighting.hazeStart) / hazeRange, 0.0f, 1.0f);
         const int haze = static_cast<int>(std::lround(t * static_cast<float>(m_lighting.hazeSteps)));
+        const auto steps = [](float value) { return static_cast<int>(std::lround((value - 1.0f) * 16.0f)); };
         // Haze pulls colours towards the pale blue horizon.
-        table[i] = gouraudOffset(lightSteps + haze, lightSteps + haze, lightSteps + haze + (haze > 0 ? 2 : 0));
+        table[i] =
+            gouraudOffset(steps(light.x) + haze, steps(light.y) + haze, steps(light.z) + haze + (haze > 0 ? 2 : 0));
     }
     return table;
 }
@@ -210,7 +227,7 @@ void Geometry::quad(const std::array<glm::vec3, 4>& corners, const Material& mat
     const glm::vec3 cross = glm::cross(corners[3] - corners[1], corners[2] - corners[0]);
     const float length = glm::length(cross);
     const glm::vec3 normal = length > 1e-6f ? cross / length : glm::vec3(0.0f, 1.0f, 0.0f);
-    const GouraudTable gouraud = shade(viewCorners, normal, material.lit);
+    const GouraudTable gouraud = shade(corners, viewCorners, normal, material.lit);
 
     float sortDepth = sumZ * 0.25f;
     if (material.sort == SortMode::Farthest) sortDepth = maxZ;
@@ -261,8 +278,11 @@ void Geometry::billboard(glm::vec3 base, glm::vec2 size, const Material& materia
     command.xy[4] = static_cast<std::int16_t>(snap(bottomRight.x) - 1);
     command.xy[5] = static_cast<std::int16_t>(snap(bottomRight.y) - 1);
 
+    // A sprite is shaded as a whole, from its middle.
+    const glm::vec3 centre = base + glm::vec3(0.0f, size.y * 0.5f, 0.0f);
+    const std::array<glm::vec3, 4> world{centre, centre, centre, centre};
     const std::array<glm::vec3, 4> depth{viewBase, viewBase, viewBase, viewBase};
-    const GouraudTable gouraud = shade(depth, glm::vec3(0.0f, 1.0f, 0.0f), false);
+    const GouraudTable gouraud = shade(world, depth, glm::vec3(0.0f, 1.0f, 0.0f), material.lit, true);
     insert(command, &gouraud, viewBase.z + material.depthBias);
 }
 

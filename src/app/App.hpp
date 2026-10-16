@@ -18,6 +18,7 @@ struct AppOptions {
     int exitAfterFrames = 0;    ///< 0 = run until closed
     std::string screenshotPath; ///< saved on the last frame when exitAfterFrames is set
     bool startInFirstPerson = false;
+    bool startAtDusk = false;
     bool captureDisplay = false;    ///< screenshot the filtered window output instead of the framebuffer
     gpu::PresentSettings present{}; ///< initial display settings
 

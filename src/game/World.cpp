@@ -61,9 +61,17 @@ void World::addTree(glm::vec3 base, float height)
     m_colliders.push_back(Aabb::fromCenter(base + glm::vec3(0.0f, height * 0.5f, 0.0f), {0.25f, height * 0.5f, 0.25f}));
 }
 
+void World::addBrazier(glm::vec3 base)
+{
+    m_braziers.push_back({base});
+    addBlock(base - glm::vec3(0.25f, 0.0f, 0.25f), base + glm::vec3(0.25f, Brazier::kPillarHeight, 0.25f),
+             BlockStyle::Stone);
+}
+
 void World::buildTestLevel()
 {
     m_blocks.clear();
+    m_braziers.clear();
     m_trees.clear();
     m_colliders.clear();
 
@@ -96,6 +104,12 @@ void World::buildTestLevel()
         const glm::vec3 center{std::cos(angle) * 22.0f, 0.0f, std::sin(angle) * 22.0f};
         addBlock(center - glm::vec3(0.5f, 0, 0.5f), center + glm::vec3(0.5f, 4.0f, 0.5f), BlockStyle::Stone);
     }
+
+    // Braziers: their fires light the area around them (best seen at dusk).
+    addBrazier({3.0f, 0.0f, 2.0f});
+    addBrazier({-3.2f, 0.0f, -11.0f});
+    addBrazier({14.5f, 1.8f, -2.5f});
+    addBrazier({-7.0f, 0.0f, -3.5f});
 
     // Trees scattered outside the play area.
     for (int i = 0; i < 28; ++i) {
@@ -158,6 +172,13 @@ void World::draw(saturn::Geometry& geometry, const Assets& assets) const
     Material treeMaterial;
     treeMaterial.texture = assets.tree;
     for (const Tree& tree : m_trees) geometry.billboard(tree.base, {tree.height * 0.5f, tree.height}, treeMaterial);
+
+    // Fire is its own light source: unlit, so it stays bright at night.
+    Material fireMaterial;
+    fireMaterial.texture = assets.fire;
+    fireMaterial.lit = false;
+    fireMaterial.depthBias = -0.3f; // in front of the pillar top it stands on
+    for (const Brazier& brazier : m_braziers) geometry.billboard(brazier.flameBase(), {0.55f, 0.8f}, fireMaterial);
 }
 
 } // namespace gridfin

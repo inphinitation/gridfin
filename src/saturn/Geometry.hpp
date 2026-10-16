@@ -59,10 +59,32 @@ struct View {
     [[nodiscard]] float horizonRow() const noexcept;
 };
 
+/// A dynamic light (torch, muzzle flash, lamp). It has no hardware support: the CPU
+/// adds it into each polygon's gouraud table, per corner and per colour channel.
+struct PointLight {
+    glm::vec3 position{0.0f};
+    glm::vec3 color{1.0f}; ///< 1 = full brightness; gouraud can brighten by at most +15/31
+    float radius = 6.0f;   ///< no effect beyond this distance
+};
+
 struct Lighting {
+    /// Lights cost CPU time per vertex, so like SGL-era engines only a handful are allowed.
+    static constexpr std::size_t kMaxPointLights = 4;
+
     glm::vec3 sunDirection = glm::normalize(glm::vec3(0.4f, 0.8f, 0.3f)); ///< towards the sun
     float ambient = 0.6f;
     float diffuse = 0.55f;
+    std::array<PointLight, kMaxPointLights> pointLights{};
+    std::size_t pointLightCount = 0;
+
+    /// Adds a light; returns false once kMaxPointLights are in use.
+    bool addPointLight(const PointLight& light) noexcept
+    {
+        if (pointLightCount >= kMaxPointLights) return false;
+        pointLights[pointLightCount++] = light;
+        return true;
+    }
+
     /// Distance haze added through the gouraud table, in 5-bit colour steps.
     float hazeStart = 24.0f;
     float hazeEnd = 60.0f;
@@ -137,7 +159,9 @@ private:
         std::int32_t next;
     };
 
-    [[nodiscard]] GouraudTable shade(const std::array<glm::vec3, 4>& viewCorners, glm::vec3 normal, bool lit) const;
+    [[nodiscard]] GouraudTable shade(const std::array<glm::vec3, 4>& worldCorners,
+                                     const std::array<glm::vec3, 4>& viewCorners, glm::vec3 normal, bool lit,
+                                     bool sprite = false) const;
     void insert(const Command& command, const GouraudTable* gouraud, float sortDepth);
     [[nodiscard]] static Command baseCommand(CommandType type, const Material& material, const Texture* texture);
     [[nodiscard]] std::optional<Texture> resolve(const Material& material);

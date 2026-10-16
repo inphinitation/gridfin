@@ -58,8 +58,33 @@ private:
     std::uint32_t m_top = 0;
 };
 
+/// Layer bits for the colour offset enable/select registers.
+namespace layer {
+inline constexpr std::uint8_t kBack = 1u << 0;
+inline constexpr std::uint8_t kNbg0 = 1u << 1;
+inline constexpr std::uint8_t kRbg0 = 1u << 2;
+inline constexpr std::uint8_t kSprite = 1u << 3; ///< everything VDP1 drew
+inline constexpr std::uint8_t kAll = kBack | kNbg0 | kRbg0 | kSprite;
+} // namespace layer
+
+/// A colour offset register: signed values (-256..255) added to each 8-bit channel.
+struct ColorOffset {
+    int r = 0;
+    int g = 0;
+    int b = 0;
+
+    friend constexpr bool operator==(const ColorOffset&, const ColorOffset&) = default;
+};
+
 /// Per-frame VDP2 register state (scroll values, rotation parameters, ...).
 struct Vdp2Registers {
+    /// Colour offset: flashes, fades and tints at no polygon cost. Each layer whose bit is set in
+    /// `colorOffsetEnable` gets offset A, or B if its bit is also set in `colorOffsetSelect`.
+    ColorOffset colorOffsetA;
+    ColorOffset colorOffsetB;
+    std::uint8_t colorOffsetEnable = 0;
+    std::uint8_t colorOffsetSelect = 0;
+
     /// Back screen line colour table: one RGB colour per scanline, stored in VRAM.
     std::uint32_t lineColorAddress = 0;
     std::array<ColorWord, kScreenHeight> lineColors{};
