@@ -234,7 +234,11 @@ TEST_CASE("Voice allocation steals the oldest note when all 32 slots are busy")
 
 TEST_CASE("The game's music fits sound RAM and renders deterministically")
 {
-    Music a, b;
+    data::Vfs vfs;
+    REQUIRE(vfs.mountPath(GRIDFIN_DATA_DIR));
+    Music a(vfs), b(vfs);
+    CHECK(a.errors().empty());
+    CHECK(a.bank().tones == 6);
     CHECK(a.scsp().ramUsed() <= kSoundRamSize);
     CHECK(a.driver().playing());
 

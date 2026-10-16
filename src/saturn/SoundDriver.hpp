@@ -73,13 +73,16 @@ struct Sequence {
 /// A compile error.
 struct Failure {
     std::string message;
+    std::size_t offset = 0; ///< where in the MML text
 };
 
 /// The result of compiling MML: a value, or an error message.
 template <typename T>
 struct CompileResult {
-    CompileResult(T result) : value(std::move(result)) {}                 // NOLINT(google-explicit-constructor)
-    CompileResult(Failure failure) : error(std::move(failure.message)) {} // NOLINT(google-explicit-constructor)
+    CompileResult(T result) : value(std::move(result)) {} // NOLINT(google-explicit-constructor)
+    CompileResult(Failure failure)                        // NOLINT(google-explicit-constructor)
+        : error(std::move(failure.message)), errorOffset(failure.offset)
+    {}
 
     explicit operator bool() const noexcept { return value.has_value(); }
     T& operator*() { return *value; }
@@ -89,6 +92,7 @@ struct CompileResult {
 
     std::optional<T> value;
     std::string error;
+    std::size_t errorOffset = 0;
 };
 
 /// Compiles one MML track.
@@ -103,6 +107,11 @@ struct CompileResult {
 /// Compiles a song from one MML string per track. The first `t` command sets the starting tempo.
 [[nodiscard]] CompileResult<Sequence> compileSong(std::span<const std::string_view> tracks);
 
+/// Compiles a song file: tracks start with a `#track <name>` line; before the first one only
+/// comments and `#title <text>` may appear. A file without `#track` lines is a single track.
+/// Errors are reported as "<line>:<column>: <message>".
+[[nodiscard]] CompileResult<Sequence> compileSongFile(std::string_view text);
+
 struct SoundDriverStats {
     int activeSlots = 0; ///< slots not in the Off phase
     int steals = 0;      ///< notes that took a slot from another note since the song started
@@ -114,6 +123,9 @@ public:
 
     /// Registers a tone and returns its number for `@`.
     int addTone(const Tone& tone);
+    /// Sets the tone for a program number (`@<program>`); unset programs are silent.
+    void setTone(int program, const Tone& tone);
+    [[nodiscard]] bool hasTone(int program) const;
     [[nodiscard]] const std::vector<Tone>& tones() const noexcept { return m_tones; }
 
     void play(Sequence sequence);

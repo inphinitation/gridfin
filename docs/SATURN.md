@@ -178,9 +178,10 @@ Language): notes with lengths and dots, rests, octave, volume, tone (`@`), gate 
 point. It runs 48 ticks per quarter note, sample-accurately. Each tone ("instrument") uses one slot, or two for FM.
 When all 32 slots are busy it takes the quietest released slot, then the oldest held note.
 
-**The music (`gridfin::Music`).** All samples are generated procedurally at start-up: single-cycle waveforms for
-bass, pad and sine (the FM operators), and 8-bit, 22 kHz one-shots for the kick, snare and hi-hat, as games stored
-drums to save sound RAM. The song is nine MML tracks: lead, bass, three pad voices, drums and an arpeggio.
+**The music (`gridfin::Music`).** Tones, samples and the song are game data (see [SOUND.md](SOUND.md)): tone files
+describe each instrument's slots, samples are either single-cycle waveforms built from harmonics or imported WAVE
+files (the drums are 8-bit, 22 kHz one-shots, as games stored them to save sound RAM), and the song is nine MML
+tracks: lead, bass, three pad voices, drums and an arpeggio.
 
 The SDL audio callback renders the SCSP directly (on the browser's audio callback on the web; browsers start audio
 after the first click or key press). **M** toggles the music. `gridfin --render-music out.wav 30` renders 30 seconds

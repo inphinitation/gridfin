@@ -12,13 +12,25 @@ AudioOutput::~AudioOutput()
     if (m_stream) SDL_DestroyAudioStream(m_stream);
 }
 
-bool AudioOutput::start()
+namespace {
+std::unique_ptr<Music> loadMusic(const data::Vfs& data)
+{
+    auto music = std::make_unique<Music>(data);
+    for (const std::string& error : music->errors()) log::warn("{}", error);
+    log::info("Sound RAM: {} KB of {} KB ({} tones, {} samples in {} KB)", music->scsp().ramUsed() / 1024,
+              saturn::kSoundRamSize / 1024, music->bank().tones, music->bank().samples,
+              music->bank().sampleBytes / 1024);
+    return music;
+}
+} // namespace
+
+bool AudioOutput::start(const data::Vfs& data)
 {
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         log::warn("No audio: {}", SDL_GetError());
         return false;
     }
-    m_music = std::make_unique<Music>();
+    m_music = loadMusic(data);
     const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, saturn::kSoundSampleRate};
     m_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &AudioOutput::feed, this);
     if (!m_stream) {
@@ -27,6 +39,15 @@ bool AudioOutput::start()
     }
     SDL_ResumeAudioStreamDevice(m_stream);
     return true;
+}
+
+void AudioOutput::reload(const data::Vfs& data)
+{
+    if (!m_music) return;
+    auto music = loadMusic(data); // outside the lock: the audio thread keeps playing meanwhile
+    const std::scoped_lock lock(m_mutex);
+    music->setPlaying(m_music->playing());
+    m_music = std::move(music);
 }
 
 void AudioOutput::toggleMusic()

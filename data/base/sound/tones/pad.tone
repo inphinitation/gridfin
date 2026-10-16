@@ -1,0 +1,10 @@
+; Pad: a soft 128-sample cycle with a slow attack and a gentle vibrato.
+program = 2
+wave = 1 0.45 0.4 0.2 0.25 0.1 0.12 0.05 0.06 0.03 0.03 0.02
+wave-length = 128
+attack = 10
+release = 15
+level = 28
+reverb = 6
+lfo-rate = 14
+vibrato = 2

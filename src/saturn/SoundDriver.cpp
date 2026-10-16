@@ -45,7 +45,7 @@ public:
                     ++m_pos;
                 }
                 const auto ticks = length();
-                if (!ticks) return Failure{m_error};
+                if (!ticks) return m_failure;
                 if (note < 0 || note > 127) return fail("note out of range");
                 track.events.push_back({TrackEvent::Type::Note, *ticks, static_cast<std::int16_t>(note)});
                 track.lengthTicks += *ticks;
@@ -53,14 +53,14 @@ public:
             }
             case 'r': {
                 const auto ticks = length();
-                if (!ticks) return Failure{m_error};
+                if (!ticks) return m_failure;
                 track.events.push_back({TrackEvent::Type::Rest, *ticks, 0});
                 track.lengthTicks += *ticks;
                 break;
             }
             case 'o': {
                 const auto value = number(0, 8);
-                if (!value) return Failure{m_error};
+                if (!value) return m_failure;
                 m_octave = *value;
                 break;
             }
@@ -68,30 +68,30 @@ public:
             case '>': ++m_octave; break;
             case 'l': {
                 const auto ticks = length(/*required=*/true);
-                if (!ticks) return Failure{m_error};
+                if (!ticks) return m_failure;
                 m_defaultLength = *ticks;
                 break;
             }
             case 'v':
-                if (!parameter(track, TrackEvent::Type::Volume, 0, 15)) return Failure{m_error};
+                if (!parameter(track, TrackEvent::Type::Volume, 0, 15)) return m_failure;
                 break;
             case '@':
-                if (!parameter(track, TrackEvent::Type::Tone, 0, 255)) return Failure{m_error};
+                if (!parameter(track, TrackEvent::Type::Tone, 0, 255)) return m_failure;
                 break;
             case 'q':
-                if (!parameter(track, TrackEvent::Type::Gate, 1, 8)) return Failure{m_error};
+                if (!parameter(track, TrackEvent::Type::Gate, 1, 8)) return m_failure;
                 break;
             case 't':
-                if (!parameter(track, TrackEvent::Type::Tempo, 20, 300)) return Failure{m_error};
+                if (!parameter(track, TrackEvent::Type::Tempo, 20, 300)) return m_failure;
                 break;
             case 'p':
-                if (!parameter(track, TrackEvent::Type::Pan, -15, 15)) return Failure{m_error};
+                if (!parameter(track, TrackEvent::Type::Pan, -15, 15)) return m_failure;
                 break;
             case '[': m_repeats.push_back({m_pos, -1}); break;
             case ']': {
                 if (m_repeats.empty()) return fail("']' without '['");
                 const auto count = optionalNumber(1, 255);
-                if (!count) return Failure{m_error};
+                if (!count) return m_failure;
                 Repeat& repeat = m_repeats.back();
                 if (repeat.remaining < 0) repeat.remaining = (*count ? *count : 2) - 1;
                 if (repeat.remaining > 0) {
@@ -131,8 +131,8 @@ private:
 
     Failure fail(std::string message)
     {
-        m_error = std::format("MML error at {}: {}", m_pos, message);
-        return Failure{m_error};
+        m_failure = Failure{std::move(message), m_pos};
+        return m_failure;
     }
 
     void skipSpace()
@@ -229,7 +229,7 @@ private:
     std::uint16_t m_defaultLength = kTicksPerQuarter;
     std::uint32_t m_loopTicks = 0;
     std::vector<Repeat> m_repeats;
-    std::string m_error;
+    Failure m_failure;
 };
 
 double noteFrequency(int note)
@@ -270,7 +270,74 @@ CompileResult<Sequence> compileSong(std::span<const std::string_view> tracks)
     Sequence sequence;
     for (std::size_t i = 0; i < tracks.size(); ++i) {
         auto track = compileMml(tracks[i]);
-        if (!track) return Failure{std::format("track {}: {}", i, track.error)};
+        if (!track) return Failure{std::format("track {}: {}", i, track.error), track.errorOffset};
+        for (const TrackEvent& event : track->events) {
+            if (event.type == TrackEvent::Type::Note || event.type == TrackEvent::Type::Rest) break;
+            if (event.type == TrackEvent::Type::Tempo) sequence.tempo = event.value;
+        }
+        sequence.tracks.push_back(std::move(*track));
+    }
+    return sequence;
+}
+
+CompileResult<Sequence> compileSongFile(std::string_view text)
+{
+    const auto location = [&](std::size_t offset) {
+        offset = std::min(offset, text.size());
+        const auto line = std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(offset), '\n') + 1;
+        const std::size_t lineStart = text.rfind('\n', offset == 0 ? 0 : offset - 1);
+        const std::size_t column = lineStart == std::string_view::npos || offset == 0 ? offset + 1 : offset - lineStart;
+        return std::format("{}:{}", line, column);
+    };
+
+    struct Part {
+        std::size_t begin, end;
+    };
+    std::vector<Part> tracks;
+    std::size_t pos = 0;
+    bool sawTrack = false;
+    while (pos < text.size()) {
+        std::size_t end = text.find('\n', pos);
+        if (end == std::string_view::npos) end = text.size();
+        const std::string_view line = text.substr(pos, end - pos);
+        if (line.starts_with("#track")) {
+            if (!tracks.empty()) tracks.back().end = pos;
+            tracks.push_back({end, text.size()});
+            sawTrack = true;
+        } else if (line.starts_with("#title")) {
+            // Metadata; the title isn't used yet.
+        } else if (line.starts_with("#")) {
+            return Failure{std::format("{}: unknown directive", location(pos)), pos};
+        } else if (!sawTrack) {
+            const std::size_t content = line.find_first_not_of(" \t\r");
+            if (content != std::string_view::npos && line[content] != ';') {
+                // No #track header at all: the whole file is one track.
+                tracks.clear();
+                break;
+            }
+        }
+        pos = end + 1;
+    }
+    if (tracks.empty()) tracks.push_back({0, text.size()});
+    // Directives inside a track's body belong to the parser's view of the text, so hide them.
+    std::vector<std::string> bodies;
+    for (const Part& part : tracks) {
+        std::string body(text.substr(part.begin, part.end - part.begin));
+        for (std::size_t i = 0; i < body.size(); ++i) {
+            if ((i == 0 || body[i - 1] == '\n') && body[i] == '#') {
+                while (i < body.size() && body[i] != '\n') body[i++] = ' ';
+            }
+        }
+        bodies.push_back(std::move(body));
+    }
+
+    Sequence sequence;
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        auto track = compileMml(bodies[i]);
+        if (!track) {
+            const std::size_t offset = tracks[i].begin + track.errorOffset;
+            return Failure{std::format("{}: {}", location(offset), track.error), offset};
+        }
         for (const TrackEvent& event : track->events) {
             if (event.type == TrackEvent::Type::Note || event.type == TrackEvent::Type::Rest) break;
             if (event.type == TrackEvent::Type::Tempo) sequence.tempo = event.value;
@@ -286,6 +353,20 @@ int SoundDriver::addTone(const Tone& tone)
 {
     m_tones.push_back(tone);
     return static_cast<int>(m_tones.size()) - 1;
+}
+
+void SoundDriver::setTone(int program, const Tone& tone)
+{
+    if (program < 0) return;
+    const auto index = static_cast<std::size_t>(program);
+    if (m_tones.size() <= index) m_tones.resize(index + 1);
+    m_tones[index] = tone;
+}
+
+bool SoundDriver::hasTone(int program) const
+{
+    return program >= 0 && static_cast<std::size_t>(program) < m_tones.size()
+           && m_tones[static_cast<std::size_t>(program)].carrier.length > 0;
 }
 
 void SoundDriver::play(Sequence sequence)
@@ -372,6 +453,7 @@ void SoundDriver::startNote(TrackState& state, std::size_t trackIndex, int note)
     releaseNote(state);
     if (state.tone < 0 || static_cast<std::size_t>(state.tone) >= m_tones.size()) return;
     const Tone& tone = m_tones[static_cast<std::size_t>(state.tone)];
+    if (tone.carrier.length == 0) return; // no tone loaded for this program
     const double frequency = tone.fixedPitch ? tone.carrier.rootFrequency : noteFrequency(note);
     const auto owner = static_cast<int>(trackIndex) + 1;
 

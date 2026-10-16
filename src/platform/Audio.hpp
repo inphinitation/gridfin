@@ -20,7 +20,9 @@ public:
     AudioOutput& operator=(const AudioOutput&) = delete;
 
     /// Opens the default playback device. Returns false (and stays silent) if there is none.
-    bool start();
+    bool start(const data::Vfs& data);
+    /// Reloads tones and the song after their files changed, keeping the music on or off.
+    void reload(const data::Vfs& data);
 
     void toggleMusic();
 

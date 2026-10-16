@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data/Vfs.hpp"
 #include "game/Game.hpp"
 #include "gfx/GpuContext.hpp"
 #include "gfx/SaturnRenderer.hpp"
@@ -14,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace gridfin {
 
@@ -28,6 +30,8 @@ struct AppOptions {
     bool mute = false;                         ///< don't open an audio device
     std::string renderMusicPath;               ///< render the music to a WAV file and exit
     float renderMusicSeconds = 30.0f;
+    std::vector<std::string> dataPaths;  ///< folders or archives to mount, later ones override
+    std::string packFolder, packArchive; ///< pack a source folder into an archive and exit
 
     [[nodiscard]] static AppOptions parse(int argc, char** argv);
 };
@@ -52,11 +56,15 @@ private:
     void toggleFullscreen();
     void presentFrame();
     [[nodiscard]] bool renderMusic() const;
+    [[nodiscard]] bool mountData();
+    void reloadChangedData();
 
     AppOptions m_options;
     SDL_Window* m_window = nullptr;
     std::unique_ptr<Input> m_input;
     std::unique_ptr<AudioOutput> m_audio;
+    data::Vfs m_data;
+    float m_reloadTimer = 0.0f;
     std::unique_ptr<gpu::GpuContext> m_gpu;
     std::unique_ptr<gpu::SaturnRenderer> m_renderer;
     gpu::PresentSettings m_present;

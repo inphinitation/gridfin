@@ -1,0 +1,6 @@
+; Bass: a bright single-cycle wave with a slow decay.
+program = 0
+wave = 1 0.5 0.33 0.25 0.2 0.12 0.08 0.05 0.03 0.02
+decay1 = 11
+release = 22
+level = 26
